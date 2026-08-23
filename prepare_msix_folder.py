@@ -27,14 +27,18 @@ def build_msix_source():
         print("[!] SwitchGate.exe not found in dist/. Run build_exe.py first.")
         return False
 
-    # ── 2. Clean previous MSIX_Source ────────────────────
-    if MSIX_DIR.exists():
-        shutil.rmtree(MSIX_DIR)
-    MSIX_DIR.mkdir()
-    print(f"[1/5] Clean MSIX_Source folder created.")
+    # ── 2. Create / Ensure MSIX_Source ──────────────────
+    MSIX_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[1/5] MSIX_Source folder verified.")
 
-    # ── 3. Copy compiled app ──────────────────────────────
-    shutil.copytree(DIST_DIR, MSIX_DIR, dirs_exist_ok=True)
+    # ── 3. High-Speed Robocopy Sync ──────────────────────
+    print(f"[*] Syncing {DIST_DIR} -> {MSIX_DIR} via robocopy...")
+    subprocess.run(
+        ["robocopy", str(DIST_DIR), str(MSIX_DIR), "/MIR", "/R:1", "/W:1", "/NFL", "/NDL", "/NP", "/NJH", "/NJS"],
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
     print(f"[2/5] Compiled app staged ({DIST_DIR.name} → MSIX_Source/).")
 
     # ── 4. Stage Assets (Store logo images) ──────────────
