@@ -126,7 +126,7 @@ except Exception as _e:
 
 class AppConfig:
     APP_NAME:    str  = "SwitchGate"
-    APP_VERSION: str  = "2.0.1"
+    APP_VERSION: str  = "2.0.3"
     HOST:        str  = "0.0.0.0"
     PORT:        int  = int(os.environ.get("SWITCHGATE_PORT", 8000))
     DEBUG:       bool = os.environ.get("SWITCHGATE_DEBUG", "false").lower() == "true"

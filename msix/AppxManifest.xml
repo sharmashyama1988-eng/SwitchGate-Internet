@@ -9,7 +9,7 @@
   <Identity
     Name="Technicalamiteducation.SwitchGateInternet"
     Publisher="CN=3B21D16C-D99E-4486-80B5-89D0B6FCE7CE"
-    Version="2.0.2.0"
+    Version="2.0.3.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
