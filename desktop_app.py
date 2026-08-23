@@ -232,18 +232,19 @@ def setup_tray(window):
     except Exception as e:
         print(f"[Tray] System tray notice: {e}")
 
-def wait_for_server(port: int, timeout: float = 25.0) -> bool:
-    """Waits for FastAPI server to accept HTTP requests and return 200 OK."""
+def wait_for_server(port: int, timeout: float = 12.0) -> bool:
+    """Waits for FastAPI server to accept HTTP requests — max 12 seconds."""
+    import urllib.request as _ur
     start = time.time()
     url = f"http://127.0.0.1:{port}/"
     while time.time() - start < timeout:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "SwitchGate-Desktop"})
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
+            req = _ur.Request(url, headers={"User-Agent": "SwitchGate-Desktop"})
+            with _ur.urlopen(req, timeout=0.8) as resp:
                 if resp.status == 200:
                     return True
         except Exception:
-            time.sleep(0.15)
+            time.sleep(0.08)   # 80ms poll — was 150ms
     return False
 
 def main():

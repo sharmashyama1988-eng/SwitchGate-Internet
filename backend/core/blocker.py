@@ -16,14 +16,31 @@ from backend.database import db
 from backend.kperf.kperf_engine import kperf_engine
 from backend.native.network_engine import native_engine
 
-# Scapy Layer 2 packet injection
+# Scapy is imported lazily inside start() — NOT at module load time
+# This saves 2-3 seconds of startup delay
 SCAPY_AVAILABLE = False
-try:
-    from scapy.all import ARP, Ether, sendp, conf
-    conf.verb = 0
-    SCAPY_AVAILABLE = True
-except Exception:
-    SCAPY_AVAILABLE = False
+_scapy_ARP = None
+_scapy_Ether = None
+_scapy_sendp = None
+
+def _load_scapy():
+    """Lazy-load Scapy on first use (not at import time)."""
+    global SCAPY_AVAILABLE, _scapy_ARP, _scapy_Ether, _scapy_sendp
+    if SCAPY_AVAILABLE:
+        return True
+    try:
+        import logging
+        logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+        logging.getLogger("scapy").setLevel(logging.ERROR)
+        from scapy.all import ARP, Ether, sendp, conf
+        conf.verb = 0
+        _scapy_ARP   = ARP
+        _scapy_Ether = Ether
+        _scapy_sendp = sendp
+        SCAPY_AVAILABLE = True
+        return True
+    except Exception:
+        return False
 
 class BlockerEngine:
     def __init__(self):

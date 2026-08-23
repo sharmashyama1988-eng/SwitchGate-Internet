@@ -17,14 +17,29 @@ from backend.config import AppConfig
 from backend.database import db
 from backend.core.oui_database import resolve_vendor_and_category
 
-# Try importing Scapy
+# Scapy imported lazily — NOT at module level (saves 2-3s startup time)
 SCAPY_AVAILABLE = False
-try:
-    from scapy.all import ARP, Ether, srp, conf
-    conf.verb = 0
-    SCAPY_AVAILABLE = True
-except Exception:
-    SCAPY_AVAILABLE = False
+_scapy_ARP   = None
+_scapy_Ether = None
+_scapy_srp   = None
+
+def _load_scapy():
+    global SCAPY_AVAILABLE, _scapy_ARP, _scapy_Ether, _scapy_srp
+    if SCAPY_AVAILABLE:
+        return True
+    try:
+        import logging
+        logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+        logging.getLogger("scapy").setLevel(logging.ERROR)
+        from scapy.all import ARP, Ether, srp, conf
+        conf.verb = 0
+        _scapy_ARP   = ARP
+        _scapy_Ether = Ether
+        _scapy_srp   = srp
+        SCAPY_AVAILABLE = True
+        return True
+    except Exception:
+        return False
 
 class NetworkScanner:
     def __init__(self):
