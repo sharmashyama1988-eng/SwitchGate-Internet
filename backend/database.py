@@ -24,11 +24,13 @@ class Database:
 
     @contextmanager
     def get_connection(self):
-        conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=20.0)
+        conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA busy_timeout=5000;")
+            conn.execute("PRAGMA cache_size=-64000;") # 64MB memory page cache
             yield conn
         finally:
             conn.close()

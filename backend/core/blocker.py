@@ -137,6 +137,39 @@ class BlockerEngine:
             print(f"[Blocker Error] unblock_device ({mac}, {ip}): {e}")
             return False
 
+    def sync_target_ip(self, mac: str, new_ip: str) -> bool:
+        """
+        Dynamically migrates active blocking rules when a device renews its DHCP lease
+        or gets assigned a new IP address, preventing stale IP poisoning or innocent client drops.
+        """
+        if not mac or not new_ip:
+            return False
+        mac = mac.lower().replace("-", ":")
+        with self._lock:
+            if mac not in self.blocked_targets:
+                return False
+            old_ip = self.blocked_targets[mac].get("ip")
+            if old_ip == new_ip:
+                return False
+            self.blocked_targets[mac]["ip"] = new_ip
+
+        # Clean old IP from firewall and restore its ARP routing
+        if old_ip:
+            try:
+                self._remove_firewall_rule(old_ip)
+                self._restore_arp(old_ip, mac)
+            except Exception:
+                pass
+
+        # Apply firewall, kill sockets, and fire immediate poison burst on new IP
+        try:
+            self._add_firewall_rule(new_ip)
+            kperf_engine.kill_sockets_by_remote_ips([new_ip])
+            self._send_poison_packets(new_ip, mac)
+            return True
+        except Exception:
+            return False
+
     def block_all(self) -> int:
         """Panic Button: Cuts off all devices and severs external connections."""
         try:

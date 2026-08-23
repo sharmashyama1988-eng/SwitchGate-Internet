@@ -47,6 +47,7 @@ class NetworkScanner:
         self._stop_event = threading.Event()
         self._bg_thread: Optional[threading.Thread] = None
         self._scan_lock = threading.Lock()
+        self._missed_pings: Dict[str, int] = {}  # MAC -> consecutive missed scan cycles (Grace period for sleep)
 
     def start_background_scan(self):
         """Starts continuous periodic network scanning."""
@@ -111,18 +112,40 @@ class NetworkScanner:
             # 4. Resolve Hostnames & Metadata concurrently
             enriched_devices = self._enrich_devices(list(discovered.values()))
 
-            # 5. Save to Database
+            # 5. Save to Database & Check Dynamic DHCP Migrations
+            seen_macs = set()
             for dev in enriched_devices:
                 # Do not treat broadcast/multicast as real client devices
-                if dev["mac"].startswith("ff:ff") or dev["mac"].startswith("01:00:5e"):
+                mac = dev["mac"].lower().replace("-", ":")
+                if mac.startswith("ff:ff") or mac.startswith("01:00:5e"):
                     continue
+                seen_macs.add(mac)
+                self._missed_pings[mac] = 0  # Reset missed ping counter on active discovery
+
+                # Check for dynamic DHCP IP change
+                existing = db.get_device(mac)
+                if existing and existing.get("ip") and existing.get("ip") != dev["ip"]:
+                    old_ip = existing.get("ip")
+                    # Synchronize with Blocker Engine dynamically
+                    try:
+                        from backend.core.blocker import blocker
+                        blocker.sync_target_ip(mac, dev["ip"])
+                    except Exception:
+                        pass
+
                 db.upsert_device(
-                    mac=dev["mac"],
+                    mac=mac,
                     ip=dev["ip"],
                     vendor=dev["vendor"],
                     device_type=dev["device_type"],
                     suggested_name=dev["friendly_name"]
                 )
+
+            # Update sliding window for devices not seen in this scan (grace period before offline)
+            for d in db.get_all_devices():
+                d_mac = d["mac"]
+                if d_mac not in seen_macs and not d_mac.startswith("ff:ff"):
+                    self._missed_pings[d_mac] = self._missed_pings.get(d_mac, 0) + 1
 
             # 6. If isolated environment or demo mode, ensure rich device set for complete testing
             if AppConfig.MOCK_DEVICES_FOR_TESTING and len(enriched_devices) <= 1:

@@ -125,12 +125,18 @@ class KPerfBridge:
 
     def start(self) -> bool:
         if self.is_loaded and self.dll:
-            return self.dll.kperf_start() == 1
+            try:
+                return self.dll.kperf_start() == 1
+            except Exception as e:
+                print(f"[kPerf FFI Error] start(): {e}")
         return False
 
     def stop(self) -> bool:
         if self.is_loaded and self.dll:
-            return self.dll.kperf_stop() == 1
+            try:
+                return self.dll.kperf_stop() == 1
+            except Exception as e:
+                print(f"[kPerf FFI Error] stop(): {e}")
         return False
 
     def get_stats(self) -> Dict[str, Any]:
@@ -146,18 +152,21 @@ class KPerfBridge:
                 "engine": "Win32 Native Direct"
             }
 
-        stats = HypervisorStats()
-        if self.dll.kperf_get_stats(byref(stats)) == 0:
-            return {
-                "is_running": bool(stats.is_running),
-                "ring_buffer_available": stats.ring_buffer_available,
-                "total_pushed": stats.total_pushed,
-                "total_popped": stats.total_popped,
-                "total_dropped": stats.total_dropped,
-                "total_shadows_captured": stats.total_shadows_captured,
-                "total_rst_injected": stats.total_rst_injected,
-                "engine": "Rust kPerf Kernel Hypervisor"
-            }
+        try:
+            stats = HypervisorStats()
+            if self.dll.kperf_get_stats(byref(stats)) == 0:
+                return {
+                    "is_running": bool(stats.is_running),
+                    "ring_buffer_available": stats.ring_buffer_available,
+                    "total_pushed": stats.total_pushed,
+                    "total_popped": stats.total_popped,
+                    "total_dropped": stats.total_dropped,
+                    "total_shadows_captured": stats.total_shadows_captured,
+                    "total_rst_injected": stats.total_rst_injected,
+                    "engine": "Rust kPerf Kernel Hypervisor"
+                }
+        except Exception as e:
+            print(f"[kPerf FFI Error] get_stats(): {e}")
         return {"is_running": False}
 
     def pop_shadows(self, max_count: int = 100) -> List[Dict[str, Any]]:
@@ -165,28 +174,34 @@ class KPerfBridge:
         if not self.is_loaded or not self.dll:
             return results
 
-        shadow = PacketShadow()
-        for _ in range(max_count):
-            if self.dll.kperf_pop_shadow(byref(shadow)) == 1:
-                loc_ip = socket.inet_ntoa(struct.pack("I", shadow.local_ip))
-                rem_ip = socket.inet_ntoa(struct.pack("I", shadow.remote_ip))
-                results.append({
-                    "pid": shadow.pid,
-                    "local_ip": loc_ip,
-                    "local_port": shadow.local_port,
-                    "remote_ip": rem_ip,
-                    "remote_port": shadow.remote_port,
-                    "protocol": "TCP" if shadow.protocol == 6 else "UDP",
-                    "tcp_state": shadow.tcp_state,
-                    "timestamp_ms": shadow.timestamp_ms
-                })
-            else:
-                break
+        try:
+            shadow = PacketShadow()
+            for _ in range(max_count):
+                if self.dll.kperf_pop_shadow(byref(shadow)) == 1:
+                    loc_ip = socket.inet_ntoa(struct.pack("I", shadow.local_ip))
+                    rem_ip = socket.inet_ntoa(struct.pack("I", shadow.remote_ip))
+                    results.append({
+                        "pid": shadow.pid,
+                        "local_ip": loc_ip,
+                        "local_port": shadow.local_port,
+                        "remote_ip": rem_ip,
+                        "remote_port": shadow.remote_port,
+                        "protocol": "TCP" if shadow.protocol == 6 else "UDP",
+                        "tcp_state": shadow.tcp_state,
+                        "timestamp_ms": shadow.timestamp_ms
+                    })
+                else:
+                    break
+        except Exception as e:
+            print(f"[kPerf FFI Error] pop_shadows(): {e}")
         return results
 
     def kill_pid(self, pid: int) -> int:
         if self.is_loaded and self.dll:
-            return int(self.dll.kperf_kill_pid(c_uint32(pid)))
+            try:
+                return int(self.dll.kperf_kill_pid(c_uint32(pid)))
+            except Exception as e:
+                print(f"[kPerf FFI Error] kill_pid({pid}): {e}")
         return 0
 
     def kill_remote_ip(self, ip_str: str) -> int:
@@ -194,18 +209,24 @@ class KPerfBridge:
             try:
                 ip_val = struct.unpack("I", socket.inet_aton(ip_str))[0]
                 return int(self.dll.kperf_kill_remote_ip(c_uint32(ip_val)))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[kPerf FFI Error] kill_remote_ip({ip_str}): {e}")
         return 0
 
     def panic_kill_all(self) -> int:
         if self.is_loaded and self.dll:
-            return int(self.dll.kperf_panic_kill_all())
+            try:
+                return int(self.dll.kperf_panic_kill_all())
+            except Exception as e:
+                print(f"[kPerf FFI Error] panic_kill_all(): {e}")
         return 0
 
     def flush_dns(self) -> bool:
         if self.is_loaded and self.dll:
-            return self.dll.kperf_flush_dns() == 1
+            try:
+                return self.dll.kperf_flush_dns() == 1
+            except Exception as e:
+                print(f"[kPerf FFI Error] flush_dns(): {e}")
         return False
 
 kperf = KPerfBridge()
