@@ -137,14 +137,16 @@ class NetworkScanner:
 
     def _scapy_arp_scan(self, cidr: str) -> List[Dict[str, str]]:
         results = []
+        if not _load_scapy():
+            return results
         try:
-            arp = ARP(pdst=cidr)
-            ether = Ether(dst="ff:ff:ff:ff:ff:ff")
+            arp    = _scapy_ARP(pdst=cidr)
+            ether  = _scapy_Ether(dst="ff:ff:ff:ff:ff:ff")
             packet = ether / arp
-            answered, _ = srp(packet, timeout=AppConfig.ARP_SCAN_TIMEOUT, verbose=0)
+            answered, _ = _scapy_srp(packet, timeout=AppConfig.ARP_SCAN_TIMEOUT, verbose=0)
             for sent, received in answered:
                 results.append({
-                    "ip": received.psrc,
+                    "ip":  received.psrc,
                     "mac": received.hwsrc.lower().replace("-", ":")
                 })
         except Exception:

