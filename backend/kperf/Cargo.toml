@@ -1,0 +1,19 @@
+[package]
+name = "kperf_core"
+version = "2.0.0"
+edition = "2021"
+authors = ["SwitchGate Core Engineering Team"]
+description = "Kernel-Level Network Hypervisor, Lock-Free Ring Buffer & Zero-Copy URL Tracker"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "kperf_core"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[dependencies]

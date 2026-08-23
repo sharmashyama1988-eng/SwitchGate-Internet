@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 rescap">
+
+  <Identity
+    Name="Technicalamiteducation.SwitchGateInternet"
+    Publisher="CN=3B21D16C-D99E-4486-80B5-89D0B6FCE7CE"
+    Version="2.0.2.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>SwitchGate Internet</DisplayName>
+    <PublisherDisplayName>Technical amit (education)</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>SwitchGate Internet: High-Performance Network Gateway, Brave-Grade Adblocker &amp; Remote Control Controller.</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="SwitchGateApp" Executable="SwitchGate.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="SwitchGate Internet"
+        Description="SwitchGate Internet Network Gateway Controller"
+        BackgroundColor="#080B13"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          Wide310x150Logo="Assets\Wide310x150Logo.png"
+          Square310x310Logo="Assets\Square310x310Logo.png"
+          ShortName="SwitchGate" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#080B13" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Full Trust: required to call Win32 APIs, manage firewall, ARP, raw sockets -->
+    <rescap:Capability Name="runFullTrust" />
+
+    <!-- Network access capabilities -->
+    <Capability Name="internetClient" />
+    <Capability Name="internetClientServer" />
+    <Capability Name="privateNetworkClientServer" />
+  </Capabilities>
+
+</Package>

@@ -1,0 +1,48 @@
+# Build artifacts
+dist/
+build/
+MSIX_Source/
+*.msix
+*.appx
+*.spec
+
+# Rust/Cargo build output (kperf native engine)
+backend/kperf/target/
+target/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+
+# Database & runtime data
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Environment
+.env
+.venv
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temp build
+SwitchGate_SSD_Build/
+*.tmp
+npcap_installer.exe

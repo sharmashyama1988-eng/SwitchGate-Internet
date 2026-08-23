@@ -1,0 +1,183 @@
+{
+  "enabled": true,
+  "current_profile": "Private",
+  "profiles": {
+    "Public": {
+      "name": "Public",
+      "description": "Maximum Security for Public Wi-Fi / Coffee Shops / Airports. Aggressive Inbound Block.",
+      "inbound_policy": "BLOCK_ALL_EXCEPT",
+      "allowed_inbound_ports": [
+        80,
+        443,
+        8000
+      ],
+      "blocked_inbound_ports": [
+        21,
+        22,
+        23,
+        135,
+        137,
+        138,
+        139,
+        445,
+        1433,
+        1521,
+        3306,
+        3389,
+        5432,
+        5900,
+        8080
+      ],
+      "blocked_outbound_ports": [
+        23,
+        445,
+        6667
+      ],
+      "blocked_ips": [
+        "192.168.1.100",
+        "10.0.0.99"
+      ],
+      "allowed_ips": []
+    },
+    "Private": {
+      "name": "Private",
+      "description": "Standard Home/Office LAN Security. Balances freedom with exploit protection.",
+      "inbound_policy": "ALLOW_ALL_EXCEPT",
+      "allowed_inbound_ports": [],
+      "blocked_inbound_ports": [
+        21,
+        23,
+        135,
+        445,
+        3389
+      ],
+      "blocked_outbound_ports": [
+        23,
+        6667
+      ],
+      "blocked_ips": [],
+      "allowed_ips": [
+        "*"
+      ]
+    },
+    "Domain": {
+      "name": "Domain",
+      "description": "Enterprise Corporate Domain Network Security with Active Directory support.",
+      "inbound_policy": "ALLOW_ALL_EXCEPT",
+      "allowed_inbound_ports": [
+        53,
+        80,
+        88,
+        135,
+        389,
+        443,
+        445,
+        636,
+        3268
+      ],
+      "blocked_inbound_ports": [
+        21,
+        23,
+        6667
+      ],
+      "blocked_outbound_ports": [
+        23,
+        6667
+      ],
+      "blocked_ips": [],
+      "allowed_ips": [
+        "*"
+      ]
+    }
+  },
+  "custom_rules": [
+    {
+      "id": "rule-smb-drop",
+      "name": "Block SMB Ransomware Vector (EternalBlue)",
+      "type": "PORT",
+      "direction": "BOTH",
+      "target": "445",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-telnet-drop",
+      "name": "Block Telnet Plaintext Exploit",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "23",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-rdp-drop",
+      "name": "Block RDP Remote Desktop Brute-Force",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "3389",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-rpc-drop",
+      "name": "Block Windows RPC Vulnerabilities",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "135",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-vnc-drop",
+      "name": "Block VNC Remote Access",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "5900",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-e24ac1b9",
+      "name": "Block Rogue Telnet Probe",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "2323",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-50bd88d5",
+      "name": "Block Rogue Telnet Probe",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "2323",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-025bb955",
+      "name": "Block Rogue Telnet Probe",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "2323",
+      "action": "DROP",
+      "enabled": true
+    },
+    {
+      "id": "rule-77dd207a",
+      "name": "Block Rogue Telnet Probe",
+      "type": "PORT",
+      "direction": "INBOUND",
+      "target": "2323",
+      "action": "DROP",
+      "enabled": true
+    }
+  ],
+  "settings": {
+    "auto_block_malware": true,
+    "heuristic_scan": true,
+    "netsh_sync": true,
+    "max_audit_logs": 5000,
+    "drop_invalid_packets": true
+  }
+}

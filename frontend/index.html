@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SwitchGate - Network Control & Remote Gateway</title>
+  <script src="/static/js/tailwind.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-[#0c0f17] text-slate-100 h-screen flex overflow-hidden">
+
+  <!-- Left Sidebar Navigation -->
+  <aside class="sidebar flex-shrink-0">
+    <!-- Brand Logo: Circle I/O with Cyan Glow -->
+    <div class="brand-badge cursor-pointer" onclick="switchView('devices')">
+      <div class="brand-io-icon">I/O</div>
+      <span class="text-xl font-bold tracking-tight text-white">SwitchGate</span>
+    </div>
+
+    <!-- Navigation Menu Items -->
+    <nav class="flex-1 space-y-1">
+      <a class="nav-link active" id="nav-dashboard" onclick="switchView('dashboard')">
+        <span>DASHBOARD</span>
+        <span class="text-[10px] font-mono text-cyan-400 font-bold" id="sidebarLiveSpeed">0.0 MB/s</span>
+      </a>
+      <a class="nav-link" id="nav-apps" onclick="switchView('apps')">
+        <span>APPS CONTROL</span>
+        <span class="text-[10px] font-mono bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/20" id="sidebarAppCount">0</span>
+      </a>
+      <a class="nav-link" id="nav-websites" onclick="switchView('websites')">
+        <span>SITES & URLS</span>
+        <span class="text-[10px] font-mono bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded-full border border-purple-500/20" id="sidebarSiteCount">0</span>
+      </a>
+      <a class="nav-link" id="nav-devices" onclick="switchView('devices')">
+        <span>DEVICES</span>
+        <span class="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20" id="sidebarDeviceCount">0</span>
+      </a>
+      <a class="nav-link" id="nav-firewall" onclick="switchView('firewall')">
+        <span>FIREWALL & THREATS</span>
+        <span class="text-[10px] font-mono bg-rose-500/10 text-rose-400 px-2 py-0.5 rounded-full border border-rose-500/20" id="sidebarFirewallThreats">0</span>
+      </a>
+      <a class="nav-link" id="nav-ghosts" onclick="switchView('ghosts')">
+        <span>GHOST LEAKS</span>
+        <span class="text-[10px] font-mono text-amber-400 font-bold" id="sidebarGhostCount">0</span>
+      </a>
+      <a class="nav-link" id="nav-logs" onclick="switchView('logs')">
+        <span>LOGS</span>
+      </a>
+      <a class="nav-link" id="nav-settings" onclick="switchView('settings')">
+        <span>SETTINGS</span>
+      </a>
+    </nav>
+
+    <!-- Sidebar Bottom Status -->
+    <div class="px-6 pt-4 border-t border-white/5 text-xs text-slate-500 font-mono">
+      <div class="text-[11px] text-slate-400">Gateway v2.0 • Real-Time</div>
+      <div class="mt-1 text-emerald-400 flex items-center gap-1.5 font-bold">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 100% REAL DATA
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content Layout -->
+  <div class="flex-1 flex flex-col min-w-0 overflow-y-auto">
+
+    <!-- Top Header Area (Exact Reference Match) -->
+    <header class="h-20 bg-[#0f1320]/90 backdrop-blur-md border-b border-white/5 px-8 flex items-center justify-between flex-shrink-0">
+      
+      <!-- Left: Title & Subtext -->
+      <div>
+        <h2 class="text-lg font-extrabold tracking-wider text-white uppercase">NETWORK CONTROL</h2>
+        <p class="text-xs text-slate-400 font-medium">Home Network (WLAN) • Live Windows Process Firewall</p>
+      </div>
+
+      <!-- Right: Status, Emergency Pause & Settings Gear -->
+      <div class="flex items-center gap-4">
+        <!-- kPerf Kernel Hypervisor Live Indicator Badge -->
+        <div class="hidden lg:flex items-center gap-2 text-xs font-medium text-cyan-400 bg-cyan-950/40 px-3.5 py-1.5 rounded-full border border-cyan-500/30 font-mono shadow-sm shadow-cyan-950/50">
+          <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+          <span>⚡ kPerf: <span id="headerKperfStatus" class="font-bold text-white">0% CPU</span> (<span id="headerKperfShadows">0</span> shadows)</span>
+        </div>
+
+        <!-- Emergency Pause / Dinner Time Freeze Master Switch -->
+        <button id="btnEmergencyPause" onclick="toggleEmergencyPause()" class="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-white/10 hover:border-rose-500/40 transition active:scale-95">
+          <span class="w-2 h-2 rounded-full bg-slate-400" id="emergencyDot"></span>
+          <span id="emergencyPauseLabel">PAUSE HOME WI-FI</span>
+        </button>
+
+        <!-- Status: Connected (Gateway IP) -->
+        <div id="headerConnectionStatus" class="flex items-center gap-2 text-xs font-medium text-slate-400 bg-white/5 px-4 py-2 rounded-full border border-white/5">
+          <span>Status:</span>
+          <span class="text-emerald-400 font-bold flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400 animate-pulse"></span> Live Stream (<span id="headerGatewayIp">192.168.1.1</span>)
+          </span>
+        </div>
+
+        <!-- Settings Gear Icon Button -->
+        <button onclick="switchView('settings')" class="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white transition">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+
+    </header>
+
+    <!-- Main Dynamic Views -->
+    <main class="flex-1 p-8 space-y-6">
+
+      <!-- Intruder Alert Banner (Conditionally Shown) -->
+      <div id="intruderAlertContainer" class="hidden"></div>
+
+      <!-- ================= 1. VIEW: APPS NETWORK CONTROL (Real Running PC Apps) ================= -->
+      <div id="view-apps" class="hidden space-y-6">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-white tracking-tight">Active Windows Apps Network Control</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Switch internet ON / OFF for specific apps in real-time without killing processes.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input id="appSearchInput" type="text" placeholder="Search app (e.g. chrome, steam)..." oninput="renderAppsList()" class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500">
+            <button onclick="fetchInitialState()" class="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-slate-300">↻ Refresh</button>
+          </div>
+        </div>
+
+        <div id="appsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <!-- Populated dynamically with real running Windows processes -->
+        </div>
+      </div>
+
+      <!-- ================= 2. VIEW: LIVE WEBSITES & URLS ================= -->
+      <div id="view-websites" class="hidden space-y-6">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-white tracking-tight">Real-Time Visited Websites & Domain Controller</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Live sites accessed across browsers. Toggle any website ON / OFF instantly.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input id="siteCustomInput" type="text" placeholder="Block custom domain (e.g. tiktok.com)..." class="bg-black/40 border border-white/10 rounded-xl px-3.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500">
+            <button onclick="addCustomBlockedSite()" class="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold">Block</button>
+          </div>
+        </div>
+
+        <div id="websitesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <!-- Populated dynamically with live visited websites -->
+        </div>
+      </div>
+
+      <!-- ================= 3. VIEW: DEVICES (Hardware Wi-Fi LAN Devices) ================= -->
+      <div id="view-devices" class="hidden space-y-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-xl font-bold text-white tracking-tight">Connected Devices (Current Session)</h3>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Active (<span id="countActive" class="text-emerald-400 font-bold">0</span>) | Paused (<span id="countPaused" class="text-rose-400 font-bold">0</span>)
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button onclick="openScheduleModal()" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-cyan-400 transition">
+              <span>🕒 Smart Scheduler</span>
+            </button>
+            <button onclick="triggerScan()" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-slate-200 transition">
+              <span>Rescan LAN</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="deviceCardsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <!-- Populated dynamically with LAN devices matching reference design -->
+        </div>
+      </div>
+
+      <!-- ================= 4. VIEW: DASHBOARD (Default Initial Screen) ================= -->
+      <div id="view-dashboard" class="space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div class="bg-[#141824] p-5 rounded-2xl border border-white/5">
+            <div class="text-xs text-slate-400">Total Network Devices</div>
+            <div class="text-2xl font-extrabold text-white mt-1" id="dashTotalCount">0</div>
+          </div>
+          <div class="bg-[#141824] p-5 rounded-2xl border border-white/5">
+            <div class="text-xs text-slate-400">Live Network Throughput</div>
+            <div class="text-2xl font-extrabold text-cyan-400 mt-1" id="dashDownSpeed">0.0 MB/s</div>
+          </div>
+          <div class="bg-[#141824] p-5 rounded-2xl border border-white/5">
+            <div class="text-xs text-slate-400">Active Windows Apps</div>
+            <div class="text-2xl font-extrabold text-purple-400 mt-1" id="dashActiveApps">0</div>
+          </div>
+          <div class="bg-[#141824] p-5 rounded-2xl border border-white/5">
+            <div class="text-xs text-slate-400">Websites Tracked</div>
+            <div class="text-2xl font-extrabold text-emerald-400 mt-1" id="dashTrackedSites">0</div>
+          </div>
+        </div>
+
+        <!-- kPerf Kernel Hypervisor Live Telemetry Card -->
+        <div class="bg-gradient-to-r from-[#0d1527] via-[#10182c] to-[#0d1527] p-6 rounded-2xl border border-cyan-500/20 shadow-lg">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2.5">
+              <span class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
+              <h3 class="text-sm font-extrabold text-white tracking-wide uppercase font-mono">⚡ kPerf - Kernel-Level Network Hypervisor & Ring Buffer</h3>
+            </div>
+            <span class="text-[11px] font-mono font-bold bg-cyan-500/10 text-cyan-400 px-3 py-1 rounded-full border border-cyan-500/20">0.0% CPU OVERHEAD</span>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
+            <div class="bg-black/30 p-3.5 rounded-xl border border-white/5">
+              <div class="text-slate-400 text-[10px]">RING BUFFER CAPACITY</div>
+              <div class="text-white font-bold text-sm mt-1">65,536 Slots</div>
+              <div class="text-emerald-400 text-[10px] mt-0.5">Lock-Free SPSC</div>
+            </div>
+            <div class="bg-black/30 p-3.5 rounded-xl border border-white/5">
+              <div class="text-slate-400 text-[10px]">PACKET SHADOWS STREAMED</div>
+              <div class="text-cyan-400 font-bold text-sm mt-1" id="dashKperfShadows">0</div>
+              <div class="text-slate-500 text-[10px] mt-0.5">Zero-Copy RAM</div>
+            </div>
+            <div class="bg-black/30 p-3.5 rounded-xl border border-white/5">
+              <div class="text-slate-400 text-[10px]">KERNEL RST INJECTIONS</div>
+              <div class="text-rose-400 font-bold text-sm mt-1" id="dashKperfRst">0</div>
+              <div class="text-slate-500 text-[10px] mt-0.5">Sub-ms Sockets</div>
+            </div>
+            <div class="bg-black/30 p-3.5 rounded-xl border border-white/5">
+              <div class="text-slate-400 text-[10px]">HYPERVISOR LATENCY</div>
+              <div class="text-emerald-400 font-bold text-sm mt-1">&lt; 0.05 ms</div>
+              <div class="text-slate-500 text-[10px] mt-0.5">Kernel Hook WFP</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live 60 FPS Bandwidth & Hypervisor Waveform Card -->
+        <div class="glass-card p-6 rounded-2xl border border-cyan-500/20 bg-gradient-to-b from-[#121727]/90 to-[#0c0f18]/90 shadow-2xl relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-md shadow-cyan-400"></span>
+              <h3 class="text-xs font-mono font-extrabold text-white tracking-widest uppercase">LIVE 60 FPS BANDWIDTH WAVEFORM</h3>
+            </div>
+            <div class="flex items-center gap-3 text-[11px] font-mono">
+              <span class="text-cyan-400 font-bold flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-cyan-400"></span> Inbound</span>
+              <span class="text-emerald-400 font-bold flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> kPerf Ring</span>
+              <span class="text-rose-400 font-bold flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-400"></span> Outbound</span>
+            </div>
+          </div>
+          <div class="h-48 w-full relative rounded-xl overflow-hidden bg-black/40 border border-white/5 shadow-inner">
+            <canvas id="bandwidthCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 5. VIEW: NEXT-GEN FIREWALL & THREAT SHIELD ================= -->
+      <div id="view-firewall" class="hidden space-y-6">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+              <span>🛡️ Next-Gen Firewall & Threat Shield</span>
+              <button onclick="toggleFirewallMaster()" id="fwStatusBadge" title="Click to Toggle Master Firewall" class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono font-bold hover:bg-emerald-500/20 transition cursor-pointer">ACTIVE (ON)</button>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">Deep packet inspection, live antivirus payload scanning, and multi-profile network filtering.</p>
+          </div>
+
+          <!-- Profile Switcher -->
+          <div class="flex items-center gap-2 bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-mono">
+            <span class="text-slate-500 px-2">Profile:</span>
+            <button onclick="setFirewallProfile('Public')" id="fwProfPublic" class="px-3 py-1 rounded-lg transition font-bold text-slate-400 hover:text-white">Public</button>
+            <button onclick="setFirewallProfile('Private')" id="fwProfPrivate" class="px-3 py-1 rounded-lg transition font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">Private</button>
+            <button onclick="setFirewallProfile('Domain')" id="fwProfDomain" class="px-3 py-1 rounded-lg transition font-bold text-slate-400 hover:text-white">Domain</button>
+          </div>
+        </div>
+
+        <!-- 4 Metric Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-[#141824] p-4 rounded-2xl border border-white/5 font-mono">
+            <div class="text-[11px] text-slate-400">PACKETS INSPECTED</div>
+            <div class="text-xl font-extrabold text-white mt-1" id="fwPacketsInspected">0</div>
+            <div class="text-cyan-400 text-[10px] mt-0.5">Deep Packet Inspection</div>
+          </div>
+          <div class="bg-[#141824] p-4 rounded-2xl border border-white/5 font-mono">
+            <div class="text-[11px] text-slate-400">THREATS DROPPED</div>
+            <div class="text-xl font-extrabold text-rose-400 mt-1" id="fwPacketsDropped">0</div>
+            <div class="text-rose-400 text-[10px] mt-0.5">ACL & Port Blockers</div>
+          </div>
+          <div class="bg-[#141824] p-4 rounded-2xl border border-white/5 font-mono">
+            <div class="text-[11px] text-slate-400">MALWARE DETECTED</div>
+            <div class="text-xl font-extrabold text-amber-400 mt-1" id="fwMalwareDetected">0</div>
+            <div class="text-amber-400 text-[10px] mt-0.5">Signatures & Heuristics</div>
+          </div>
+          <div class="bg-[#141824] p-4 rounded-2xl border border-white/5 font-mono">
+            <div class="text-[11px] text-slate-400">WINDOWS NETSH SYNC</div>
+            <div class="text-xl font-extrabold text-emerald-400 mt-1" id="fwNetshState">ACTIVE</div>
+            <div class="text-emerald-400 text-[10px] mt-0.5">Kernel Hardware Hook</div>
+          </div>
+        </div>
+
+        <!-- Custom Rule Adder & Active Rules -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <!-- Add Rule Card -->
+          <div class="bg-[#141824] p-5 rounded-2xl border border-white/5 space-y-4">
+            <h4 class="text-sm font-bold text-white flex items-center gap-1.5">
+              <span>➕ Add Custom Firewall Rule</span>
+            </h4>
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="text-slate-400 block mb-1">Rule Name</label>
+                <input id="fwRuleName" type="text" placeholder="e.g. Block Malware Server" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-500">
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-slate-400 block mb-1">Type</label>
+                  <select id="fwRuleType" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-500">
+                    <option value="IP">IP Address</option>
+                    <option value="PORT">Port Number</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-slate-400 block mb-1">Direction</label>
+                  <select id="fwRuleDirection" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-500">
+                    <option value="INBOUND">Inbound</option>
+                    <option value="OUTBOUND">Outbound</option>
+                    <option value="BOTH">Both</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="text-slate-400 block mb-1">Target (IP or Port)</label>
+                <input id="fwRuleTarget" type="text" placeholder="e.g. 192.168.1.100 or 8080" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-500">
+              </div>
+              <button onclick="addCustomFirewallRule()" class="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs transition">
+                Create Firewall Rule
+              </button>
+            </div>
+          </div>
+
+          <!-- Active Rules Table -->
+          <div class="lg:col-span-2 bg-[#141824] p-5 rounded-2xl border border-white/5 space-y-3">
+            <div class="flex items-center justify-between">
+              <h4 class="text-sm font-bold text-white">Active Firewall ACL Rules</h4>
+              <button onclick="fetchFirewallRules()" class="text-xs text-cyan-400 hover:underline">↻ Refresh</button>
+            </div>
+            <div id="fwRulesList" class="space-y-2 max-h-60 overflow-y-auto font-mono text-xs">
+              <!-- Dynamically populated rules -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Firewall Drop & Security Events -->
+        <div class="bg-[#111624] border border-white/5 rounded-2xl p-5 space-y-3">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-bold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-rose-400 animate-ping"></span>
+              <span>Live Firewall Threat Audit Log Stream</span>
+            </h4>
+            <span class="text-[11px] font-mono text-slate-500">Real-time Sniffer</span>
+          </div>
+          <div id="fwAuditLogList" class="space-y-2 max-h-48 overflow-y-auto font-mono text-xs text-slate-300">
+            <!-- Dynamically populated live logs -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 6. VIEW: GHOST LEAKS ================= -->
+      <div id="view-ghosts" class="hidden space-y-5">
+        <div>
+          <h3 class="text-lg font-bold text-white">📊 Ghost Data & Stealth Leaks Tracker</h3>
+          <p class="text-xs text-slate-400">Identifies covert apps & servers stealing data while devices are locked.</p>
+        </div>
+
+        <div id="ghostLeaksList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+      </div>
+
+      <!-- ================= 6. VIEW: LOGS ================= -->
+      <div id="view-logs" class="hidden space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-bold text-white">System & Firewall Packet Activity Logs</h3>
+          <span class="text-xs text-slate-500 font-mono">Live Stream</span>
+        </div>
+        <div id="logsContainer" class="bg-[#111624] border border-white/5 rounded-2xl p-4 font-mono text-xs space-y-2 max-h-[65vh] overflow-y-auto"></div>
+      </div>
+
+      <!-- ================= 7. VIEW: SETTINGS ================= -->
+      <div id="view-settings" class="hidden max-w-4xl space-y-6 pb-12">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 class="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+              <span>⚙️ SwitchGate Internet: Advanced Settings</span>
+              <span class="text-xs px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono font-bold">Enterprise UTM</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">Core network adapters, deep traffic inspection, antivirus, connection encryption, and anti-tamper security.</p>
+          </div>
+          <button onclick="saveAllAdvancedSettings()" class="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs transition flex items-center gap-2 shadow-lg shadow-cyan-500/20">
+            <span>💾 Save All Settings</span>
+          </button>
+        </div>
+
+        <!-- 1. Core Network & Interface Control -->
+        <div class="bg-[#141824] border border-white/5 rounded-2xl p-5 space-y-4">
+          <div class="flex items-center gap-2 pb-2 border-b border-white/5 text-cyan-400 font-bold text-sm">
+            <span>📡 1. Core Network & Interface Control (नेटवर्क और एडाप्टर नियंत्रण)</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-200 mb-1">Adapter Binding</label>
+              <div class="text-[11px] text-slate-400 mb-2">तय करें कि कंट्रोलर किस नेटवर्क कार्ड का ट्रैफिक संभालेगा।</div>
+              <select id="settingAdapterBinding" onchange="saveAdvancedSetting('adapter_binding', this.value)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                <option value="All Network Adapters">All Network Adapters (Universal Mode)</option>
+                <option value="Wi-Fi 2">Wi-Fi Adapter (Wi-Fi 2)</option>
+                <option value="Ethernet">Ethernet (LAN Cable)</option>
+                <option value="Virtual Adapter">Virtual / VPN Adapter</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-200 mb-1">Fail-Safe Mode (Default Behavior)</label>
+              <div class="text-[11px] text-slate-400 mb-2">बिना नियम वाले नए ट्रैफिक को डिफ़ॉल्ट रूप से क्या करना है।</div>
+              <select id="settingFailsafeMode" onchange="saveAdvancedSetting('failsafe_mode', this.value)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                <option value="DROP">DROP / BLOCK (Maximum Security - Recommended)</option>
+                <option value="ALLOW">ALLOW (Permissive Mode)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-200 mb-1">Packet Inspection Depth (DPI)</label>
+              <div class="text-[11px] text-slate-400 mb-2">डीप पैकेट इंस्पेक्शन (DPI) का स्तर तय करना।</div>
+              <select id="settingDpiDepth" onchange="saveAdvancedSetting('dpi_depth', this.value)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                <option value="Deep">Deep / Extreme (Full Payload Inspection & Antivirus)</option>
+                <option value="Standard">Standard (Header & Port Analysis)</option>
+                <option value="Lite">Lite (Battery & Low CPU Saver)</option>
+              </select>
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Network Profile Auto-Switching</div>
+                <div class="text-[11px] text-slate-400">Public Wi-Fi मिलने पर सुरक्षा नियम स्वतः Public में बदलना।</div>
+              </div>
+              <input type="checkbox" id="settingAutoProfile" onchange="saveAdvancedSetting('auto_profile_switching', this.checked)" class="w-5 h-5 accent-cyan-400 cursor-pointer">
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Advanced Traffic & App Filtering -->
+        <div class="bg-[#141824] border border-white/5 rounded-2xl p-5 space-y-4">
+          <div class="flex items-center gap-2 pb-2 border-b border-white/5 text-purple-400 font-bold text-sm">
+            <span>🛡️ 2. Advanced Traffic & App Filtering (एप्लिकेशन और ट्रैफिक नियंत्रण)</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Process/App-Based Blocking</div>
+                <div class="text-[11px] text-slate-400">सॉफ्टवेयर (utorrent, zoom आदि) को 1-क्लिक में ब्लॉक करना।</div>
+              </div>
+              <input type="checkbox" id="settingProcessBlocking" onchange="saveAdvancedSetting('process_blocking_enabled', this.checked)" class="w-5 h-5 accent-purple-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Protocol Hardening</div>
+                <div class="text-[11px] text-slate-400">असुरक्षित प्रोटोकॉल्स (FTP 21, Telnet 23, HTTP 80, SMB 445) को ब्लॉक करना।</div>
+              </div>
+              <input type="checkbox" id="settingProtocolHardening" onchange="saveAdvancedSetting('protocol_hardening', this.checked)" class="w-5 h-5 accent-purple-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Inbound Stealth Mode (Port Scan Shield)</div>
+                <div class="text-[11px] text-slate-400">बंद पोर्ट्स को छुपाना ताकि बाहर से कोई पोर्ट स्कैन न कर सके।</div>
+              </div>
+              <input type="checkbox" id="settingStealthMode" onchange="saveAdvancedSetting('stealth_mode', this.checked)" class="w-5 h-5 accent-purple-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Bandwidth Throttling (Per-App)</div>
+                <div class="text-[11px] text-slate-400">बैकग्राउंड ऐप्स के लिए डेटा स्पीड की सीमा तय करना।</div>
+              </div>
+              <input type="checkbox" id="settingBandwidthThrottling" onchange="saveAdvancedSetting('bandwidth_throttling', this.checked)" class="w-5 h-5 accent-purple-400 cursor-pointer">
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Security, Anti-Virus & Smart Filtering -->
+        <div class="bg-[#141824] border border-white/5 rounded-2xl p-5 space-y-4">
+          <div class="flex items-center gap-2 pb-2 border-b border-white/5 text-emerald-400 font-bold text-sm">
+            <span>🦠 3. Security, Anti-Virus & Smart Filtering (सुरक्षा और कंटेंट फिल्टर)</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-200 mb-1">Ad-Blocker Aggressiveness (Brave-Rust Engine)</label>
+              <div class="text-[11px] text-slate-400 mb-2">वेबसाइटें पूरी तरह चलेंगी, केवल विज्ञापन और ट्रैकर गायब होंगे।</div>
+              <select id="settingAdblockAggression" onchange="saveAdvancedSetting('adblock_aggression', this.value)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                <option value="High">High (Zero YouTube Video Ads, Banners & Trackers)</option>
+                <option value="Medium">Medium (Standard Banners & Popups)</option>
+                <option value="Low">Low (Popups only)</option>
+              </select>
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Real-Time Payload Hash Scanning</div>
+                <div class="text-[11px] text-slate-400">डाउनलोड हो रहे बाइट्स का MD5/SHA256 वायरस डेटाबेस से मिलान।</div>
+              </div>
+              <input type="checkbox" id="settingPayloadHash" onchange="saveAdvancedSetting('realtime_payload_hashing', this.checked)" class="w-5 h-5 accent-emerald-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Enforce DNS SafeSearch</div>
+                <div class="text-[11px] text-slate-400">Google, Bing और YouTube पर एडल्ट कंटेंट को जबरन रोकना।</div>
+              </div>
+              <input type="checkbox" id="settingSafeSearch" onchange="saveAdvancedSetting('dns_safesearch', this.checked)" class="w-5 h-5 accent-emerald-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Threat Intelligence Auto-Sync</div>
+                <div class="text-[11px] text-slate-400">खतरनाक व फ्रॉड (Phishing) वेबसाइट्स की सूची 24 घंटे में ऑटो-अपडेट।</div>
+              </div>
+              <input type="checkbox" id="settingThreatIntel" onchange="saveAdvancedSetting('threat_intel_auto_update', this.checked)" class="w-5 h-5 accent-emerald-400 cursor-pointer">
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Connection Security & Privacy -->
+        <div class="bg-[#141824] border border-white/5 rounded-2xl p-5 space-y-4">
+          <div class="flex items-center gap-2 pb-2 border-b border-white/5 text-amber-400 font-bold text-sm">
+            <span>🔒 4. Connection Security & Privacy (गोपनीयता और एन्क्रिप्शन)</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-200 mb-1">Encrypted DNS (DoH / DoT)</label>
+              <div class="text-[11px] text-slate-400 mb-2">ISP से ब्राउज़िंग हिस्ट्री छुपाने के लिए एन्क्रिप्टेड DNS।</div>
+              <select id="settingSecureDns" onchange="saveAdvancedSetting('secure_dns_doh', this.value)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                <option value="Cloudflare (1.1.1.1)">Cloudflare Privacy DNS (1.1.1.1)</option>
+                <option value="Quad9 (9.9.9.9)">Quad9 Malware-Blocking DNS (9.9.9.9)</option>
+                <option value="Google (8.8.8.8)">Google Public DNS (8.8.8.8)</option>
+                <option value="Off">System Default (Unencrypted)</option>
+              </select>
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Enforce IPsec Policies (AES-256)</div>
+                <div class="text-[11px] text-slate-400">भरोसेमंद कंप्यूटर के साथ कम्युनिकेशन्स को AES-256 से एनक्रिप्ट करना।</div>
+              </div>
+              <input type="checkbox" id="settingEnforceIpsec" onchange="saveAdvancedSetting('enforce_ipsec', this.checked)" class="w-5 h-5 accent-amber-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">VPN Passthrough Protocol</div>
+                <div class="text-[11px] text-slate-400">WireGuard, OpenVPN और IPsec को फ़ायरवॉल से पास होने की अनुमति देना।</div>
+              </div>
+              <input type="checkbox" id="settingVpnPassthrough" onchange="saveAdvancedSetting('vpn_passthrough', this.checked)" class="w-5 h-5 accent-amber-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Auto-Quarantine Rogue Intruders</div>
+                <div class="text-[11px] text-slate-400">अनजान वाई-फ़ाई डिवाइस कनेक्ट होते ही स्वतः ब्लॉक करना।</div>
+              </div>
+              <input type="checkbox" id="settingQuarantine" onchange="saveAdvancedSetting('auto_quarantine', this.checked)" class="w-5 h-5 accent-amber-400 cursor-pointer">
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. System Auditing, Logs & Self-Protection -->
+        <div class="bg-[#141824] border border-white/5 rounded-2xl p-5 space-y-4">
+          <div class="flex items-center gap-2 pb-2 border-b border-white/5 text-rose-400 font-bold text-sm">
+            <span>📋 5. System Auditing, Logs & Self-Protection (लॉग्स और आत्म-सुरक्षा)</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-200 mb-1">Audit Logging Level</label>
+              <div class="text-[11px] text-slate-400 mb-2">रिकॉर्ड रखने का स्तर तय करें।</div>
+              <select id="settingAuditLevel" onchange="saveAdvancedSetting('audit_logging_level', this.value)" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                <option value="THREATS_ONLY">Threats & Dropped Packets Only (Recommended)</option>
+                <option value="DROPS_ONLY">Drops & Blackhole Interceptions</option>
+                <option value="ALL_CONNECTIONS">All Connections (Verbose Auditing)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-200 mb-1">Log Retention & Rotation Policy</label>
+              <div class="text-[11px] text-slate-400 mb-2">सुरक्षा लॉग्स को कितने दिनों बाद ऑटो-क्लीन करना है।</div>
+              <select id="settingLogRetention" onchange="saveAdvancedSetting('log_retention_days', parseInt(this.value))" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+                <option value="7">7 Days Rotation</option>
+                <option value="14">14 Days Rotation (Standard)</option>
+                <option value="30">30 Days Retention</option>
+                <option value="90">90 Days Enterprise Archive</option>
+              </select>
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Anti-Tamper Process Protection</div>
+                <div class="text-[11px] text-slate-400">सॉफ्टवेयर को टास्क मैनेजर या वायरस द्वारा बंद होने से रोकना।</div>
+              </div>
+              <input type="checkbox" id="settingAntiTamper" onchange="saveAdvancedSetting('anti_tamper_protection', this.checked)" class="w-5 h-5 accent-rose-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Live Attack Desktop Notifications</div>
+                <div class="text-[11px] text-slate-400">पोर्ट स्कैनिंग या DoS हमले पर तुरंत अलर्ट भेजना।</div>
+              </div>
+              <input type="checkbox" id="settingAttackAlerting" onchange="saveAdvancedSetting('live_attack_alerting', this.checked)" class="w-5 h-5 accent-rose-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Windows Auto-Start on Boot</div>
+                <div class="text-[11px] text-slate-400">कंप्यूटर शुरू होते ही बैकग्राउंड में चालू होना।</div>
+              </div>
+              <input type="checkbox" id="settingStartup" onchange="saveAdvancedSetting('run_on_startup', this.checked)" class="w-5 h-5 accent-cyan-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Minimize to System Tray on Close</div>
+                <div class="text-[11px] text-slate-400">विंडो बंद करने पर बैकग्राउंड में चालू रहना।</div>
+              </div>
+              <input type="checkbox" id="settingTray" onchange="saveAdvancedSetting('minimize_to_tray', this.checked)" class="w-5 h-5 accent-cyan-400 cursor-pointer">
+            </div>
+          </div>
+        </div>
+
+        <!-- Hardware Network Diagnostic Footer -->
+        <div class="bg-black/30 rounded-2xl p-4 border border-white/5 text-xs font-mono text-slate-400 flex flex-wrap items-center justify-between gap-3">
+          <div><span class="text-slate-500">Interface:</span> <span id="settingsIface" class="text-cyan-400 font-bold">Wi-Fi 2</span></div>
+          <div><span class="text-slate-500">Local IP:</span> <span id="settingsLocalIp" class="text-white">10.231.22.87</span></div>
+          <div><span class="text-slate-500">Gateway IP:</span> <span id="settingsGateway" class="text-white">10.231.22.167</span></div>
+          <div><span class="text-slate-500">DNS Sinkhole Port:</span> <span class="text-emerald-400 font-bold">5353 (UDP)</span></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Smart Time-Scheduler Modal -->
+  <div id="scheduleModal" class="modal-overlay">
+    <div class="modal-window p-6 space-y-5">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3">
+        <h3 class="font-bold text-white text-base">🕒 Smart Time-Scheduler</h3>
+        <button onclick="closeModal('scheduleModal')" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Target Device</label>
+          <select id="schedDeviceSelect" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white"></select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Auto-Cutoff Time (Bedtime)</label>
+            <input type="time" id="schedStartTime" value="22:00" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Auto-Restore Time (Morning)</label>
+            <input type="time" id="schedEndTime" value="06:00" class="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Schedule Name</label>
+          <input type="text" id="schedRuleName" value="Kids Bedtime" class="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-3 border-t border-white/10">
+        <button onclick="closeModal('scheduleModal')" class="px-4 py-2 rounded-xl bg-white/5 text-xs text-slate-300">Cancel</button>
+        <button onclick="submitNewSchedule()" class="px-4 py-2 rounded-xl bg-cyan-500 text-black text-xs font-bold">Save Schedule</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastContainer"></div>
+
+  <!-- Scripts -->
+  <script src="/static/js/crashpad.js"></script>
+  <script src="/static/js/components.js"></script>
+  <script src="/static/js/websocket.js"></script>
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
