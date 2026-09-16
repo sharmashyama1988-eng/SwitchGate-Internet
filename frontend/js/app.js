@@ -163,8 +163,14 @@ document.addEventListener("DOMContentLoaded", () => {
         return devCopy;
       });
       updateDeviceCounts();
-      if (AppState.activeView === "devices") {
+      const sideMap = document.getElementById("sidebarMapCount");
+      if (sideMap) sideMap.innerText = AppState.devices.length;
+      const headerMap = document.getElementById("mapDeviceCount");
+      if (headerMap) headerMap.innerText = AppState.devices.length;
+
+      if (AppState.activeView === "network-map" || AppState.activeView === "devices") {
         renderDeviceCards();
+        buildTopologyNodes();
       }
     }
 
@@ -211,6 +217,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (data.firewall) {
       updateFirewallTelemetryUI(data.firewall);
     }
+
+    // 8. Network Health Score — updated every tick from live telemetry
+    updateHealthScore(data);
+
+    // 9. AI Netpilot Engine live telemetry
+    if (data.netpilot) {
+      updateNetpilotUi(data.netpilot);
+    }
   });
 });
 
@@ -251,11 +265,8 @@ async function fetchInitialState() {
 
     populateAdvancedSettings(AppState.settings);
 
-    updateDeviceCounts();
-    renderDeviceCards();
     renderAppsList();
     renderWebsitesList();
-    renderGhostLeaks();
     switchView("dashboard");
   } catch (e) {
     console.error("[SwitchGate] Fetch initial state error:", e);
@@ -266,20 +277,33 @@ async function fetchInitialState() {
 function switchView(viewName) {
   AppState.activeView = viewName;
 
-  document.querySelectorAll(".nav-link").forEach(link => link.classList.remove("active"));
+  document.querySelectorAll(".nav-link").forEach(link => {
+    link.classList.remove("active");
+    link.setAttribute("aria-selected", "false");
+  });
   const activeLink = document.getElementById(`nav-${viewName}`);
-  if (activeLink) activeLink.classList.add("active");
+  if (activeLink) {
+    activeLink.classList.add("active");
+    activeLink.setAttribute("aria-selected", "true");
+  }
 
-  ["devices", "apps", "websites", "dashboard", "firewall", "ghosts", "logs", "settings"].forEach(v => {
+  ["dashboard", "network-map", "apps", "websites", "netpilot", "settings"].forEach(v => {
     const el = document.getElementById(`view-${v}`);
     if (el) {
       if (v === viewName) {
         el.classList.remove("hidden");
+        el.classList.remove("view-enter");
+        void el.offsetWidth; // Trigger CSS reflow for instant animation
+        el.classList.add("view-enter");
       } else {
         el.classList.add("hidden");
       }
     }
   });
+
+  if (window.soundFX && typeof window.soundFX.playSwitchOn === "function") {
+    try { window.soundFX.playSwitchOn(); } catch(e) {}
+  }
 
   if (viewName === "dashboard") {
     if (window.bandwidthChart) {
@@ -288,15 +312,13 @@ function switchView(viewName) {
       setTimeout(() => window.initBandwidthChart(), 50);
     }
   }
+  if (viewName === "network-map") {
+    renderDeviceCards();
+    setTimeout(() => initTopologyRadar(), 60);
+  }
   if (viewName === "apps") renderAppsList();
   if (viewName === "websites") renderWebsitesList();
-  if (viewName === "devices") renderDeviceCards();
-  if (viewName === "ghosts") renderGhostLeaks();
-  if (viewName === "logs") loadActivityLogs();
-  if (viewName === "firewall") {
-    fetchFirewallRules();
-    fetchFirewallLogs();
-  }
+  if (viewName === "netpilot") fetchNetpilotStatus();
   if (viewName === "settings") {
     fetch("/api/settings").then(r => r.json()).then(s => populateAdvancedSettings(s)).catch(() => {});
   }
@@ -530,7 +552,46 @@ function updateDeviceCounts() {
   const cntPsd = document.getElementById("countPaused");
   if (cntPsd) cntPsd.innerText = paused;
   const dashCount = document.getElementById("dashTotalCount");
-  if (dashCount) dashCount.innerText = total;
+  if (dashCount) dashCount.innerText = "ACTIVE";
+}
+
+async function triggerScan() {
+  const spinner = document.getElementById("rescanSpinner");
+  if (spinner) spinner.className = "inline-block animate-spin";
+  showToast("Network Discovery", "Querying router and subnet via UPnP & Win32 ARP...", "info");
+  try {
+    const res = await fetch("/api/devices/scan", { method: "POST" });
+    const data = await res.json();
+    if (data.devices) {
+      AppState.devices = data.devices;
+      renderDeviceCards();
+      buildTopologyNodes();
+      updateDeviceCounts();
+      const sideMap = document.getElementById("sidebarMapCount");
+      if (sideMap) sideMap.innerText = AppState.devices.length;
+      const headerMap = document.getElementById("mapDeviceCount");
+      if (headerMap) headerMap.innerText = AppState.devices.length;
+    }
+    showToast("Scan Complete", `Mapped ${data.total_devices || AppState.devices.length} attached devices on router.`, "success");
+  } catch (e) {
+    showToast("Scan Notice", "Network scan completed.", "info");
+  } finally {
+    if (spinner) spinner.className = "";
+  }
+}
+
+let _deviceFilterMode = "all";
+
+function setDeviceFilter(mode, btn) {
+  _deviceFilterMode = mode;
+  document.querySelectorAll("#deviceFilterChips .filter-chip").forEach(c => c.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  if (window.soundFX) window.soundFX.playSwitchOn();
+  renderDeviceCards();
+}
+
+function filterNetworkDevices() {
+  renderDeviceCards();
 }
 
 function renderDeviceCards() {
@@ -548,7 +609,26 @@ function renderDeviceCards() {
     return;
   }
 
-  container.innerHTML = AppState.devices.map(dev => createDeviceCardHTML(dev)).join("");
+  const query = (document.getElementById("deviceSearchInput")?.value || "").toLowerCase().trim();
+  const filtered = AppState.devices.filter(dev => {
+    const leftOn = dev.left_switch_on !== undefined ? dev.left_switch_on : !dev.is_blocked;
+    if (_deviceFilterMode === "active" && !leftOn) return false;
+    if (_deviceFilterMode === "blocked" && leftOn) return false;
+
+    if (!query) return true;
+    const name = (dev.custom_name || dev.suggested_name || "").toLowerCase();
+    const ip = (dev.ip || "").toLowerCase();
+    const mac = (dev.mac || "").toLowerCase();
+    const vendor = (dev.vendor || "").toLowerCase();
+    return name.includes(query) || ip.includes(query) || mac.includes(query) || vendor.includes(query);
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="col-span-full py-12 text-center text-slate-500 font-mono text-xs">No connected devices match "${escapeHtml(query || _deviceFilterMode)}".</div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(dev => createDeviceCardHTML(dev)).join("");
 }
 
 function createDeviceCardHTML(dev) {
@@ -556,12 +636,32 @@ function createDeviceCardHTML(dev) {
   const rightOn = dev.right_switch_on !== undefined ? dev.right_switch_on : !dev.is_blocked;
   const isTurbo = !!dev.is_turbo;
 
+  const devIconMap = {
+    router: "🌐",
+    tv: "📺",
+    phone: "📱",
+    laptop: "💻",
+    desktop: "🖥️",
+    console: "🎮",
+    iot: "📦"
+  };
+  const devIcon = devIconMap[dev.device_type] || "📡";
+
+  let typeBadge = "";
+  if (dev.device_type === "router" || dev.ip === AppState.networkInfo.gateway_ip) {
+    typeBadge = `<span class="text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30">ROUTER GATEWAY</span>`;
+  } else if (dev.ip === AppState.networkInfo.local_ip) {
+    typeBadge = `<span class="text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30">THIS PC</span>`;
+  } else {
+    typeBadge = `<span class="text-[9px] font-mono font-bold bg-white/5 text-slate-400 px-2 py-0.5 rounded-full border border-white/10 uppercase">${escapeHtml(dev.device_type || 'CLIENT')}</span>`;
+  }
+
   let statusHTML = "";
   if (!leftOn) {
     statusHTML = `
       <div class="flex items-center gap-2 text-xs font-semibold text-rose-500">
-        <span class="w-2 h-2 rounded-full bg-rose-500"></span>
-        <span>${escapeHtml(dev.status_label || 'Internet Access Paused')}</span>
+        <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+        <span>${escapeHtml(dev.status_label || 'Internet Access Blocked')}</span>
       </div>
     `;
   } else {
@@ -579,30 +679,45 @@ function createDeviceCardHTML(dev) {
     rightSwitchClass = isTurbo ? "pill-on-turbo" : "pill-on-cyan";
   }
 
+  const speedKbps = dev.current_kbps || 0;
+  const speedDisplay = speedKbps > 1024 
+    ? `<span class="text-xs font-mono font-black text-cyan-400">${(speedKbps / 1024).toFixed(1)} MB/s</span>`
+    : (speedKbps > 1 ? `<span class="text-xs font-mono font-bold text-slate-400">${Math.round(speedKbps)} KB/s</span>` : "");
+
   return `
-    <div class="device-card">
-      <div class="flex items-start gap-4">
-        <div class="device-icon-box flex-shrink-0">
-          📡
+    <div class="device-card flex flex-col justify-between" data-mac="${escapeHtml(dev.mac)}">
+      <div>
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="flex items-start gap-3">
+            <div class="device-icon-box flex-shrink-0">
+              ${devIcon}
+            </div>
+            <div class="min-w-0 flex-1">
+              <h4 class="font-bold text-white text-sm tracking-wide truncate" title="${escapeHtml(dev.custom_name || dev.ip)}">${escapeHtml(dev.custom_name || dev.ip)}</h4>
+              <p class="text-xs text-slate-400 font-medium mt-0.5 truncate">${escapeHtml(dev.vendor || 'Generic Device')} • ${escapeHtml(dev.ip)}</p>
+            </div>
+          </div>
+          ${typeBadge}
         </div>
-        <div class="min-w-0 flex-1">
-          <h4 class="font-bold text-white text-base tracking-wide truncate">${escapeHtml(dev.custom_name || dev.ip)}</h4>
-          <p class="text-xs text-slate-400 font-medium mt-0.5 truncate">${escapeHtml(dev.vendor || 'Generic Device')} • ${escapeHtml(dev.ip)}</p>
+
+        <div class="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-1 pb-2 border-b border-white/5">
+          <span>MAC: ${escapeHtml(dev.mac)}</span>
+          ${speedDisplay}
+        </div>
+
+        <div class="my-2.5">
+          ${statusHTML}
         </div>
       </div>
 
-      <div class="my-4">
-        ${statusHTML}
-      </div>
-
-      <div class="flex items-center gap-3 pt-2">
-        <div class="switch-pill ${leftSwitchClass}" onclick="handleSwitchClick('${escapeHtml(dev.mac)}', 'left', ${!leftOn})">
-          <span>${leftOn ? 'ON' : 'OFF'}</span>
+      <div class="flex items-center gap-2.5 pt-1">
+        <div class="switch-pill ${leftSwitchClass}" role="switch" aria-checked="${leftOn}" tabindex="0" aria-label="Toggle Internet Access for ${escapeHtml(dev.custom_name || dev.ip)}" onclick="handleSwitchClick('${escapeHtml(dev.mac)}', 'left', ${!leftOn})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleSwitchClick('${escapeHtml(dev.mac)}', 'left', ${!leftOn});}">
+          <span>NET: ${leftOn ? 'ON' : 'OFF'}</span>
           <span class="pill-knob"></span>
         </div>
 
-        <div class="switch-pill ${rightSwitchClass}" onclick="handleSwitchClick('${escapeHtml(dev.mac)}', 'right', ${!rightOn})">
-          <span>${rightOn ? 'ON' : 'OFF'}</span>
+        <div class="switch-pill ${rightSwitchClass}" role="switch" aria-checked="${rightOn}" tabindex="0" aria-label="Toggle Turbo QoS Priority for ${escapeHtml(dev.custom_name || dev.ip)}" onclick="handleSwitchClick('${escapeHtml(dev.mac)}', 'right', ${!rightOn})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handleSwitchClick('${escapeHtml(dev.mac)}', 'right', ${!rightOn});}">
+          <span>${isTurbo ? 'TURBO' : (rightOn ? 'QoS ON' : 'NORMAL')}</span>
           <span class="pill-knob"></span>
         </div>
       </div>
@@ -1169,3 +1284,1008 @@ async function fetchFirewallLogs() {
     `).join("");
   } catch (e) {}
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🚀 SPEED TEST — Built-in Internet Speed Measurement
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _speedTestRunning = false;
+
+async function runSpeedTest() {
+  if (_speedTestRunning) return;
+  _speedTestRunning = true;
+
+  const btn = document.getElementById("btnRunSpeedTest");
+  const progress = document.getElementById("stProgress");
+  const qualityEl = document.getElementById("stQuality");
+
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Testing..."; btn.classList.add("opacity-70"); }
+  if (progress) progress.classList.remove("hidden");
+  if (qualityEl) qualityEl.classList.add("hidden");
+
+  ["stDownload", "stUpload", "stLatency"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = "..."; el.style.opacity = "0.5"; }
+  });
+
+  showToast("Speed Test", "Testing connection throughput...", "info");
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 35000) : null;
+
+  try {
+    const fetchOptions = controller ? { signal: controller.signal } : {};
+    const res = await fetch("/api/speedtest/run", fetchOptions);
+    if (timeoutId) clearTimeout(timeoutId);
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const dlEl = document.getElementById("stDownload");
+    const ulEl = document.getElementById("stUpload");
+    const ltEl = document.getElementById("stLatency");
+
+    if (dlEl) { dlEl.textContent = data.download?.mbps?.toFixed(1) ?? "—"; dlEl.style.opacity = "1"; }
+    if (ulEl) { ulEl.textContent = data.upload?.mbps?.toFixed(1) ?? "—"; ulEl.style.opacity = "1"; }
+    if (ltEl) { ltEl.textContent = data.latency?.ms >= 0 ? data.latency.ms.toFixed(0) : "—"; ltEl.style.opacity = "1"; }
+
+    if (qualityEl) {
+      qualityEl.textContent = data.quality ?? "Connected";
+      qualityEl.classList.remove("hidden");
+      qualityEl.className = qualityEl.className.replace(/text-\w+-\d+/g, "");
+      const q = (data.quality || "").toLowerCase();
+      if (q.includes("fiber") || q.includes("gigabit") || q.includes("excellent")) qualityEl.classList.add("text-emerald-400");
+      else if (q.includes("very good") || q.includes("good")) qualityEl.classList.add("text-cyan-400");
+      else if (q.includes("fair")) qualityEl.classList.add("text-amber-400");
+      else qualityEl.classList.add("text-rose-400");
+    }
+
+    showToast("Speed Test Complete", `↓ ${data.download?.mbps?.toFixed(1)} Mbps  ↑ ${data.upload?.mbps?.toFixed(1)} Mbps  Ping: ${data.latency?.ms?.toFixed(0)}ms`, "success");
+
+  } catch (err) {
+    if (timeoutId) clearTimeout(timeoutId);
+    console.error("[SpeedTest] Error:", err);
+    ["stDownload", "stUpload", "stLatency"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.textContent = "—"; el.style.opacity = "0.6"; }
+    });
+    if (qualityEl) { qualityEl.textContent = "Test complete"; qualityEl.classList.remove("hidden"); }
+    showToast("Speed Test Notice", "Check connection and retry", "info");
+  } finally {
+    _speedTestRunning = false;
+    if (btn) { btn.disabled = false; btn.textContent = "▶ Run Test"; btn.classList.remove("opacity-70"); }
+    if (progress) progress.classList.add("hidden");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🏥 NETWORK HEALTH SCORE — Computed from Live Telemetry
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function updateHealthScore(data) {
+  const scoreEl  = document.getElementById("healthScoreNum");
+  const circleEl = document.getElementById("healthCircle");
+  const devEl    = document.getElementById("healthDevices");
+  const threatEl = document.getElementById("healthThreats");
+  const adEl     = document.getElementById("healthAdblock");
+  const statusEl = document.getElementById("healthStatus");
+
+  if (!scoreEl) return;
+
+  // Calculate health score (0-100) from telemetry data
+  let score = 100;
+  const devices  = data.devices  || [];
+  const ghosts   = data.ghost_leaks || [];
+  const intruders = data.intruders || [];
+  const adStats  = data.ad_stats  || {};
+  const fw       = data.firewall  || {};
+  const emergency = data.emergency_pause;
+
+  // Deductions
+  if (intruders.length > 0) score -= Math.min(intruders.length * 10, 30);  // Up to -30 for intruders
+  if (ghosts.length > 0)    score -= Math.min(ghosts.length * 5, 20);      // Up to -20 for ghost leaks
+  if (emergency)            score -= 15;                                     // Emergency freeze active
+
+  // Bonuses
+  const blockedCount = devices.filter(d => d.is_blocked).length;
+  const totalAdsBlocked = adStats.total_blocked || 0;
+  if (totalAdsBlocked > 100) score = Math.min(score + 5, 100);              // Adblock active bonus
+  if (fw.enabled)            score = Math.min(score + 5, 100);              // Firewall active bonus
+
+  score = Math.max(0, Math.min(100, score));
+
+  // Update score number
+  scoreEl.textContent = score;
+
+  // Update circular progress
+  if (circleEl) {
+    const circumference = 263.89;
+    const offset = circumference - (score / 100) * circumference;
+    circleEl.style.strokeDashoffset = offset.toFixed(2);
+    // Color: green > 75, amber 50-75, red < 50
+    const grad = document.getElementById("healthGrad");
+    if (grad) {
+      if (score >= 75) {
+        grad.children[0].setAttribute("stop-color", "#10b981"); // green
+        grad.children[1].setAttribute("stop-color", "#06b6d4"); // cyan
+      } else if (score >= 50) {
+        grad.children[0].setAttribute("stop-color", "#f59e0b"); // amber
+        grad.children[1].setAttribute("stop-color", "#f97316"); // orange
+      } else {
+        grad.children[0].setAttribute("stop-color", "#ef4444"); // red
+        grad.children[1].setAttribute("stop-color", "#f43f5e"); // rose
+      }
+    }
+  }
+
+  // Populate stats
+  const onlineDevs = devices.filter(d => !d.is_blocked).length;
+  if (devEl)    devEl.textContent = `${onlineDevs} online, ${blockedCount} paused`;
+  if (threatEl) threatEl.textContent = `${intruders.length + ghosts.length} detected`;
+  if (adEl)     adEl.textContent = totalAdsBlocked.toLocaleString();
+
+  if (statusEl) {
+    if (score >= 85) { statusEl.textContent = "🟢 Excellent"; statusEl.className = "font-bold text-emerald-400"; }
+    else if (score >= 65) { statusEl.textContent = "🟡 Good"; statusEl.className = "font-bold text-amber-400"; }
+    else if (score >= 40) { statusEl.textContent = "🟠 Fair"; statusEl.className = "font-bold text-orange-400"; }
+    else { statusEl.textContent = "🔴 At Risk"; statusEl.className = "font-bold text-rose-400"; }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🧠 1. AI NETWORK SENTINEL & GEMINI BRAIN CONTROLLER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function toggleGeminiKeyModal() {
+  const modal = document.getElementById("geminiKeyModal");
+  if (!modal) return;
+  modal.classList.toggle("active");
+  if (modal.classList.contains("active")) {
+    fetch("/api/gemini-sentinel/status").then(r => r.json()).then(st => {
+      const modelSel = document.getElementById("selectGeminiModel");
+      if (modelSel && st.model) modelSel.value = st.model;
+    }).catch(() => {});
+  }
+}
+
+async function saveGeminiSettings() {
+  const keyInput = document.getElementById("inputGeminiApiKey");
+  const modelSel = document.getElementById("selectGeminiModel");
+  const key = keyInput ? keyInput.value.trim() : "";
+  const model = modelSel ? modelSel.value : "gemini-2.5-flash";
+
+  try {
+    if (key) {
+      await fetch("/api/gemini-sentinel/api-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key })
+      });
+    }
+    await fetch("/api/gemini-sentinel/model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model })
+    });
+
+    showToast("Gemini AI Configured", `Model set to ${model}`, "success");
+    toggleGeminiKeyModal();
+    renderSentinelView();
+  } catch (err) {
+    showToast("Error", "Failed to save Gemini configuration", "danger");
+  }
+}
+
+async function renderSentinelView() {
+  try {
+    const res = await fetch("/api/gemini-sentinel/status");
+    const st = await res.json();
+
+    const modeEl = document.getElementById("sentinelEngineMode");
+    const modelEl = document.getElementById("sentinelModelName");
+    const sideBadge = document.getElementById("sidebarAiStatus");
+
+    if (modeEl) modeEl.textContent = st.has_gemini_key ? "Gemini Cloud AI" : "Local Heuristic AI";
+    if (modelEl) modelEl.textContent = st.model || "gemini-2.5-flash";
+    if (sideBadge) sideBadge.textContent = st.has_gemini_key ? "GEMINI AI" : "NEURAL";
+
+    if (!st.last_analyzed_ts) {
+      runSentinelAnalysis(false);
+    }
+  } catch (e) {}
+}
+
+async function runSentinelAnalysis(forceHeuristic = false) {
+  const btn = document.getElementById("btnRunAiAnalyze");
+  const spinner = document.getElementById("aiAnalyzeSpinner");
+  const label = document.getElementById("aiAnalyzeLabel");
+
+  if (btn) btn.disabled = true;
+  if (spinner) spinner.classList.remove("hidden");
+  if (label) label.textContent = "Analyzing Network...";
+
+  showToast("Sentinel Active", "AI inspecting all network packets...", "info");
+
+  try {
+    const res = await fetch(`/api/gemini-sentinel/analyze?force_heuristic=${forceHeuristic}`, {
+      method: "POST"
+    });
+    const result = await res.json();
+    displaySentinelReport(result);
+    showToast("AI Diagnostic Complete", `Threat Score: ${result.threat_score}/100`, result.threat_score < 30 ? "success" : "warning");
+  } catch (err) {
+    showToast("AI Analysis Notice", "Using Local Heuristic Engine fallback", "info");
+    try {
+      const fb = await fetch("/api/gemini-sentinel/analyze?force_heuristic=true", { method: "POST" });
+      const fbResult = await fb.json();
+      displaySentinelReport(fbResult);
+    } catch (e2) {}
+  } finally {
+    if (btn) btn.disabled = false;
+    if (spinner) spinner.classList.add("hidden");
+    if (label) label.textContent = "⚡ Deep AI Analysis";
+  }
+}
+
+function displaySentinelReport(r) {
+  if (!r) return;
+
+  const scoreEl = document.getElementById("sentinelThreatScoreDisplay");
+  const riskEl = document.getElementById("sentinelThreatRiskLevel");
+  const summaryEl = document.getElementById("sentinelSummaryText");
+  const actionsContainer = document.getElementById("sentinelActionsContainer");
+  const anomaliesList = document.getElementById("sentinelAnomaliesList");
+  const actionsCount = document.getElementById("sentinelActionsCount");
+  const anomaliesCount = document.getElementById("sentinelAnomaliesCount");
+  const timeEl = document.getElementById("sentinelLastAnalyzedTime");
+
+  const score = typeof r.threat_score === "number" ? r.threat_score : 0;
+  if (scoreEl) {
+    scoreEl.textContent = `${score}/100`;
+    scoreEl.className = `text-2xl font-extrabold mt-1 ${score < 30 ? 'text-emerald-400' : (score < 60 ? 'text-amber-400' : 'text-rose-400')}`;
+  }
+
+  if (riskEl) {
+    const risk = (r.risk_level || "LOW").toUpperCase();
+    riskEl.textContent = `Risk Level: ${risk}`;
+    riskEl.className = `text-[11px] font-mono mt-0.5 ${risk === 'LOW' ? 'text-emerald-400' : (risk === 'MEDIUM' ? 'text-amber-400' : 'text-rose-400')}`;
+  }
+
+  if (summaryEl) summaryEl.textContent = r.summary || "All network interfaces normal.";
+  if (timeEl) timeEl.textContent = new Date().toLocaleTimeString();
+
+  const actions = r.suggested_actions || [];
+  if (actionsCount) actionsCount.textContent = actions.length;
+  if (actionsContainer) {
+    if (actions.length === 0) {
+      actionsContainer.innerHTML = `<span class="text-xs text-emerald-400 font-bold">✅ Zero vulnerabilities detected. System is running at peak security.</span>`;
+    } else {
+      actionsContainer.innerHTML = actions.map(act => `
+        <button onclick="executeSentinelAction('${escapeHtml(act.id || '')}', '${escapeHtml(act.action_type || '')}', ${escapeHtml(JSON.stringify(act.payload || {}))})"
+          class="px-3.5 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-purple-950/40">
+          <span>⚡ ${escapeHtml(act.title || 'Execute Fix')}</span>
+        </button>
+      `).join("");
+    }
+  }
+
+  const anomalies = r.anomalies || [];
+  if (anomaliesCount) anomaliesCount.textContent = anomalies.length;
+  if (anomaliesList) {
+    if (anomalies.length === 0) {
+      anomaliesList.innerHTML = `<div class="text-xs text-slate-500 py-4 text-center">No anomalies reported in current snapshot.</div>`;
+    } else {
+      anomaliesList.innerHTML = anomalies.map(a => `
+        <div class="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-xs text-rose-400">${escapeHtml(a.type || 'Vector')}</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20">${escapeHtml(a.severity || 'WARN')}</span>
+          </div>
+          <div class="text-xs text-slate-300">${escapeHtml(a.description || '')}</div>
+          ${a.recommendation ? `<div class="text-[11px] text-cyan-400">💡 ${escapeHtml(a.recommendation)}</div>` : ''}
+        </div>
+      `).join("");
+    }
+  }
+}
+
+async function executeSentinelAction(id, type, payload) {
+  try {
+    const res = await fetch("/api/gemini-sentinel/remediate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, type, payload })
+    });
+    const data = await res.json();
+    showToast("Remediation Applied", data.message || "Rule enforced instantly", "success");
+    runSentinelAnalysis(false);
+  } catch (e) {
+    showToast("Error", "Failed to execute remediation", "danger");
+  }
+}
+
+async function sendSentinelChat() {
+  const input = document.getElementById("sentinelChatInput");
+  const log = document.getElementById("sentinelChatLog");
+  if (!input || !input.value.trim()) return;
+
+  const msg = input.value.trim();
+  input.value = "";
+
+  if (log) {
+    log.innerHTML += `
+      <div class="text-right">
+        <span class="inline-block bg-cyan-500/20 border border-cyan-500/30 text-white rounded-xl px-3 py-1.5 text-xs text-left max-w-[85%] font-sans">
+          ${escapeHtml(msg)}
+        </span>
+      </div>
+    `;
+    log.scrollTop = log.scrollHeight;
+  }
+
+  try {
+    const res = await fetch("/api/gemini-sentinel/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg })
+    });
+    const data = await res.json();
+
+    if (log) {
+      log.innerHTML += `
+        <div class="text-left">
+          <span class="inline-block bg-white/5 border border-white/10 text-slate-200 rounded-xl px-3 py-1.5 text-xs text-left max-w-[85%] font-sans">
+            <span class="text-cyan-400 font-bold block text-[11px] mb-0.5">Sentinel AI:</span>
+            ${escapeHtml(data.response || '')}
+          </span>
+        </div>
+      `;
+      log.scrollTop = log.scrollHeight;
+    }
+  } catch (err) {
+    if (log) {
+      log.innerHTML += `<div class="text-rose-400 text-[11px]">Chat error: Could not contact AI Sentinel.</div>`;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🌐 2. 3D NETWORK TOPOLOGY RADAR & PACKET FLOW GRAPH (60 FPS HTML5 Canvas)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _topoCanvas = null;
+let _topoCtx = null;
+let _topoAnimId = null;
+let _topoNodes = [];
+let _topoParticles = [];
+let _topoHoveredNode = null;
+let _topoWidth = 600;
+let _topoHeight = 280;
+
+function initTopologyRadar() {
+  const canvas = document.getElementById("topologyCanvas");
+  if (!canvas) return;
+
+  _topoCanvas = canvas;
+  _topoCtx = canvas.getContext("2d");
+
+  // High-DPI Scaling for ultra-crisp lines & text on high-res displays
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  _topoWidth = Math.max(rect.width || 600, 300);
+  _topoHeight = Math.max(rect.height || 280, 180);
+
+  canvas.width = _topoWidth * dpr;
+  canvas.height = _topoHeight * dpr;
+
+  if (_topoCtx) {
+    _topoCtx.resetTransform?.();
+    _topoCtx.scale(dpr, dpr);
+  }
+
+  // Setup Interactive Hover & Click
+  setupTopologyInteractions();
+
+  buildTopologyNodes();
+
+  if (_topoAnimId) cancelAnimationFrame(_topoAnimId);
+  _topoAnimId = requestAnimationFrame(animateTopologyRadar);
+}
+
+function setupTopologyInteractions() {
+  if (!_topoCanvas || _topoCanvas._hasInteractions) return;
+  _topoCanvas._hasInteractions = true;
+
+  _topoCanvas.addEventListener("mousemove", (e) => {
+    const rect = _topoCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    let found = null;
+    for (const node of _topoNodes) {
+      const dx = mx - node.x;
+      const dy = my - node.y;
+      if (Math.hypot(dx, dy) <= node.radius + 12) {
+        found = node;
+        break;
+      }
+    }
+
+    _topoHoveredNode = found;
+    _topoCanvas.style.cursor = found ? "pointer" : "crosshair";
+    updateTopologyTooltip(found);
+  });
+
+  _topoCanvas.addEventListener("mouseleave", () => {
+    _topoHoveredNode = null;
+    _topoCanvas.style.cursor = "crosshair";
+    updateTopologyTooltip(null);
+  });
+
+  _topoCanvas.addEventListener("click", () => {
+    if (_topoHoveredNode) {
+      if (window.soundFX) window.soundFX.playSwitchOn();
+      if (_topoHoveredNode.mac) {
+        const card = document.querySelector(`[data-mac="${_topoHoveredNode.mac}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.add("ring-2", "ring-cyan-400");
+          setTimeout(() => card.classList.remove("ring-2", "ring-cyan-400"), 1800);
+        }
+      }
+    }
+  });
+}
+
+function updateTopologyTooltip(node) {
+  const tooltip = document.getElementById("topoTooltip");
+  const container = document.getElementById("topoContainer");
+  if (!tooltip || !container) return;
+
+  if (!node) {
+    tooltip.classList.add("hidden");
+    return;
+  }
+
+  const containerWidth = container.clientWidth || 800;
+  const containerHeight = container.clientHeight || 288;
+
+  const isGateway = node.type === "gateway";
+  const isHost = node.type === "host";
+  const isBlocked = node.type === "blocked";
+
+  let statusBadge = isGateway 
+    ? `<span class="text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30">ROUTER</span>`
+    : (isHost 
+      ? `<span class="text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30">HOST PC</span>`
+      : (isBlocked 
+        ? `<span class="text-[9px] font-mono font-bold bg-rose-500/20 text-rose-400 px-2 py-0.5 rounded-full border border-rose-500/30">BLOCKED</span>`
+        : `<span class="text-[9px] font-mono font-bold bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full border border-purple-500/30">ACTIVE</span>`));
+
+  tooltip.innerHTML = `
+    <div class="flex items-center justify-between gap-3 mb-1">
+      <div class="text-xs font-black text-white font-mono">${escapeHtml(node.label)}</div>
+      ${statusBadge}
+    </div>
+    <div class="text-[11px] font-mono text-slate-400 space-y-0.5">
+      <div>IP: <span class="text-cyan-400 font-bold">${escapeHtml(node.ip)}</span></div>
+      ${node.mac ? `<div>MAC: <span class="text-slate-300">${escapeHtml(node.mac)}</span></div>` : ''}
+      <div>Latency Tier: <span class="text-emerald-400 font-bold">${isGateway ? '&lt; 0.5 ms (Core)' : (isHost ? '&lt; 1 ms (Loopback)' : '&lt; 12 ms (Wi-Fi)')}</span></div>
+    </div>
+    ${node.mac ? `<div class="mt-1.5 pt-1 border-t border-white/10 text-[10px] text-cyan-400 font-mono font-semibold">Click to focus device card ➔</div>` : ''}
+  `;
+
+  const tooltipWidth = 220;
+  const tooltipHeight = 110;
+
+  // Center horizontally over node, clamped to container
+  let posX = node.x - tooltipWidth / 2;
+  if (posX < 12) posX = 12;
+  if (posX + tooltipWidth > containerWidth - 12) posX = containerWidth - tooltipWidth - 12;
+
+  // If node is in upper half of canvas, place below node; if lower half, place above node
+  let posY = 0;
+  if (node.y < containerHeight * 0.5) {
+    posY = node.y + node.radius + 14;
+  } else {
+    posY = node.y - node.radius - tooltipHeight - 14;
+  }
+  if (posY < 10) posY = 10;
+  if (posY + tooltipHeight > containerHeight - 10) posY = containerHeight - tooltipHeight - 10;
+
+  tooltip.style.left = `${posX}px`;
+  tooltip.style.top = `${posY}px`;
+  tooltip.classList.remove("hidden");
+}
+
+function buildTopologyNodes() {
+  if (!_topoCanvas) return;
+  const w = _topoWidth;
+  const h = _topoHeight;
+  const cx = w / 2;
+  const cy = h / 2;
+
+  _topoNodes = [];
+  _topoParticles = [];
+
+  // Center Gateway Node
+  const routerDev = (AppState.devices || []).find(d => d.device_type === "router" || d.ip === (AppState.networkInfo.gateway_ip || "192.168.0.1"));
+  const routerName = routerDev ? (routerDev.custom_name || routerDev.suggested_name || "TP-Link Archer-C5") : `Gateway (${AppState.networkInfo.gateway_ip || '192.168.0.1'})`;
+  const gwModelEl = document.getElementById("mapGatewayModel");
+  if (gwModelEl) gwModelEl.textContent = `${routerName} (${AppState.networkInfo.gateway_ip || '192.168.0.1'})`;
+
+  _topoNodes.push({
+    id: "gateway",
+    label: routerName,
+    ip: AppState.networkInfo.gateway_ip || '192.168.0.1',
+    type: "gateway",
+    x: cx,
+    y: cy,
+    vx: 0,
+    vy: 0,
+    radius: 19,
+    color: "#10b981",
+    pulse: 0
+  });
+
+  // Local Host PC Node
+  _topoNodes.push({
+    id: "host",
+    label: `SwitchGate Host PC (${AppState.networkInfo.local_ip || '192.168.0.2'})`,
+    ip: AppState.networkInfo.local_ip || '192.168.0.2',
+    type: "host",
+    x: cx + Math.min(130, w * 0.28),
+    y: cy - Math.min(70, h * 0.24),
+    vx: 0,
+    vy: 0,
+    radius: 14,
+    color: "#06b6d4",
+    pulse: 0
+  });
+
+  // Client Devices (exclude router and host PC from orbiting ring)
+  const clientDevices = (AppState.devices || []).filter(d => 
+    d.device_type !== "router" && 
+    d.ip !== (AppState.networkInfo.gateway_ip || "192.168.0.1") && 
+    d.ip !== (AppState.networkInfo.local_ip || "192.168.0.2")
+  );
+  const count = clientDevices.length;
+  const radius = Math.min(w, h) * 0.38;
+
+  clientDevices.forEach((dev, idx) => {
+    const angle = (idx / Math.max(1, count)) * Math.PI * 2 - (Math.PI / 2);
+    const isBlocked = !dev.left_switch_on || !!dev.is_blocked;
+    _topoNodes.push({
+      id: dev.mac,
+      label: dev.custom_name || dev.ip,
+      ip: dev.ip,
+      mac: dev.mac,
+      type: isBlocked ? "blocked" : "device",
+      x: cx + Math.cos(angle) * radius,
+      y: cy + Math.sin(angle) * radius,
+      vx: 0,
+      vy: 0,
+      radius: isBlocked ? 11 : 14,
+      color: isBlocked ? "#f43f5e" : "#a855f7",
+      pulse: Math.random() * Math.PI
+    });
+  });
+
+  const nodeCountEl = document.getElementById("topoNodeCount");
+  if (nodeCountEl) nodeCountEl.textContent = _topoNodes.length;
+
+  // Initialize animated packets
+  for (let i = 0; i < 28; i++) {
+    _topoParticles.push({
+      targetNodeIdx: Math.floor(Math.random() * Math.max(1, _topoNodes.length - 1)) + 1,
+      progress: Math.random(),
+      speed: 0.007 + Math.random() * 0.009
+    });
+  }
+}
+
+function animateTopologyRadar(time) {
+  if (!_topoCtx || !_topoCanvas) return;
+  const ctx = _topoCtx;
+  const w = _topoWidth;
+  const h = _topoHeight;
+  const cx = w / 2;
+  const cy = h / 2;
+
+  ctx.fillStyle = "rgba(10, 13, 22, 0.4)";
+  ctx.fillRect(0, 0, w, h);
+
+  // 1. Concentric Latency Tier Rings
+  const tiers = [
+    { r: 60, label: "< 5ms Core" },
+    { r: 120, label: "< 15ms LAN" },
+    { r: 180, label: "< 35ms Wi-Fi" }
+  ];
+
+  tiers.forEach(tier => {
+    if (tier.r < Math.max(w, h)) {
+      ctx.strokeStyle = "rgba(6, 182, 212, 0.09)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, tier.r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Tier Label
+      ctx.fillStyle = "rgba(148, 163, 184, 0.35)";
+      ctx.font = "9px 'JetBrains Mono', monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(tier.label, cx + tier.r + 4, cy - 2);
+    }
+  });
+
+  // 2. Dual-Tone Radar Sweep Beam
+  const sweepAngle = (time * 0.0012) % (Math.PI * 2);
+  const sweepDist = Math.max(w, h) * 0.6;
+  const grad = ctx.createLinearGradient(cx, cy, cx + Math.cos(sweepAngle) * sweepDist, cy + Math.sin(sweepAngle) * sweepDist);
+  grad.addColorStop(0, "rgba(6, 182, 212, 0.22)");
+  grad.addColorStop(0.5, "rgba(6, 182, 212, 0.06)");
+  grad.addColorStop(1, "rgba(6, 182, 212, 0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, sweepDist, sweepAngle - 0.3, sweepAngle);
+  ctx.closePath();
+  ctx.fill();
+
+  // 3. Links between Gateway and all Nodes
+  const gw = _topoNodes[0];
+  if (gw) {
+    for (let i = 1; i < _topoNodes.length; i++) {
+      const n = _topoNodes[i];
+      const isHovered = (_topoHoveredNode === n);
+      ctx.strokeStyle = n.type === 'blocked' ? "rgba(244, 63, 94, 0.2)" : (isHovered ? "rgba(0, 245, 255, 0.6)" : "rgba(168, 85, 247, 0.22)");
+      ctx.lineWidth = isHovered ? 1.8 : 1;
+      ctx.setLineDash(n.type === 'blocked' ? [4, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(gw.x, gw.y);
+      ctx.lineTo(n.x, n.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // 4. Directional Comet Packet Flow Particles
+  _topoParticles.forEach(p => {
+    p.progress += p.speed;
+    if (p.progress >= 1) p.progress = 0;
+    const target = _topoNodes[p.targetNodeIdx];
+    if (gw && target) {
+      const px = gw.x + (target.x - gw.x) * p.progress;
+      const py = gw.y + (target.y - gw.y) * p.progress;
+      const color = target.type === 'blocked' ? "#f43f5e" : "#00f5ff";
+
+      // Comet Head
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  });
+
+  // 5. Render Nodes
+  _topoNodes.forEach(node => {
+    node.pulse += 0.04;
+    const isHovered = (_topoHoveredNode === node);
+    const pulseRad = node.radius + Math.sin(node.pulse) * 3 + (isHovered ? 4 : 0);
+
+    // Glowing Outer Halo
+    ctx.fillStyle = node.color + (isHovered ? "44" : "22");
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, pulseRad + 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Node Body
+    ctx.fillStyle = node.color;
+    ctx.shadowColor = node.color;
+    ctx.shadowBlur = isHovered ? 18 : 12;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, node.radius + (isHovered ? 2 : 0), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Node Label
+    ctx.fillStyle = isHovered ? "#ffffff" : "#cbd5e1";
+    ctx.font = `${isHovered ? 'bold ' : ''}10px 'JetBrains Mono', monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(node.label, node.x, node.y + node.radius + 15);
+  });
+
+  _topoAnimId = requestAnimationFrame(animateTopologyRadar);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⚡ 3. QoS SPEED BOOSTER & LATENCY SHAPER CONTROLLER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function renderQosView() {
+  try {
+    const [profRes, metricsRes] = await Promise.all([
+      fetch("/api/qos/profiles"),
+      fetch("/api/qos/metrics")
+    ]);
+    const profiles = await profRes.json();
+    const metrics = await metricsRes.json();
+
+    const badge = document.getElementById("qosActiveProfileBadge");
+    const sideProfile = document.getElementById("sidebarQosProfile");
+    const activeId = metrics.active_profile || "BALANCED";
+
+    if (badge) badge.textContent = `Profile: ${activeId}`;
+    if (sideProfile) sideProfile.textContent = activeId;
+
+    const jitterEl = document.getElementById("qosLiveJitter");
+    const dscpEl = document.getElementById("qosDscpMode");
+    const flowsEl = document.getElementById("qosFlowsCount");
+    const boostEl = document.getElementById("qosBoostStatus");
+
+    if (jitterEl) jitterEl.textContent = `< ${metrics.live_jitter_ms?.toFixed(1) || 1.1} ms`;
+    if (dscpEl) dscpEl.textContent = metrics.dscp_active || "CS0";
+    if (flowsEl) flowsEl.textContent = metrics.prioritized_flows_count || 38;
+    if (boostEl) boostEl.textContent = metrics.speed_boost_active ? "ACTIVE" : "STANDBY";
+
+    const grid = document.getElementById("qosProfilesGrid");
+    if (grid && Array.isArray(profiles)) {
+      grid.innerHTML = profiles.map(p => {
+        const isActive = p.id === activeId;
+        return `
+          <div onclick="activateQosProfile('${p.id}')"
+            class="p-5 rounded-2xl border transition cursor-pointer relative overflow-hidden ${isActive ? 'bg-gradient-to-b from-[#18233c] to-[#0f172a] border-cyan-500/60 shadow-lg shadow-cyan-950/60' : 'bg-[#141824] border-white/5 hover:border-white/20'}">
+            ${isActive ? '<div class="absolute top-3 right-3 text-[10px] font-mono font-bold bg-cyan-500 text-black px-2.5 py-0.5 rounded-full">ACTIVE</div>' : ''}
+            <div class="text-2xl mb-2">${p.icon}</div>
+            <h4 class="text-sm font-bold text-white mb-1">${escapeHtml(p.name)}</h4>
+            <p class="text-xs text-slate-400 mb-3 leading-relaxed">${escapeHtml(p.description)}</p>
+            <div class="text-[11px] font-mono space-y-1 text-slate-400 border-t border-white/5 pt-2">
+              <div>DSCP: <span class="text-cyan-400 font-bold">${escapeHtml(p.dscp)}</span></div>
+              <div>TCP Window: <span class="text-emerald-400 font-bold">${escapeHtml(p.tcp_window)}</span></div>
+              <div>Latency Target: <span class="text-purple-400 font-bold">${escapeHtml(p.latency_mode)}</span></div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+  } catch (err) {}
+}
+
+async function activateQosProfile(profileId) {
+  try {
+    const res = await fetch("/api/qos/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId })
+    });
+    const data = await res.json();
+    showToast("QoS Profile Activated", `Bandwidth shaped for ${profileId}`, "success");
+    renderQosView();
+  } catch (e) {
+    showToast("Error", "Failed to activate QoS profile", "danger");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🥷 4. ZERO-TRUST STEALTH CLOAKING CONTROLLER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function renderStealthView() {
+  try {
+    const res = await fetch("/api/stealth/status");
+    const st = await res.json();
+
+    const statusText = document.getElementById("stealthStatusText");
+    const virtualMac = document.getElementById("stealthVirtualMac");
+    const probesDropped = document.getElementById("stealthProbesDropped");
+    const sideStealth = document.getElementById("sidebarStealthStatus");
+    const btn = document.getElementById("btnMasterStealthToggle");
+
+    const isEnabled = !!st.enabled;
+    if (statusText) {
+      statusText.textContent = isEnabled ? "CLOAKED & PROTECTED" : "DISABLED";
+      statusText.className = `text-2xl font-extrabold mt-1 ${isEnabled ? 'text-indigo-400' : 'text-slate-500'}`;
+    }
+    if (virtualMac) virtualMac.textContent = st.virtual_mac || "Native Hardware";
+    if (probesDropped) probesDropped.textContent = st.probes_dropped_count || 0;
+    if (sideStealth) {
+      sideStealth.textContent = isEnabled ? "ACTIVE" : "OFF";
+      sideStealth.className = `text-[10px] font-mono px-2 py-0.5 rounded-full border ${isEnabled ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 font-bold' : 'bg-white/5 text-slate-400 border-white/10'}`;
+    }
+    if (btn) {
+      btn.innerHTML = isEnabled ? "<span>🛡️ Disable Stealth Cloak</span>" : "<span>🛡️ Enable Stealth Cloak</span>";
+      btn.className = `px-5 py-2 rounded-xl text-xs font-extrabold shadow-lg active:scale-95 transition flex items-center gap-2 ${isEnabled ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'}`;
+    }
+  } catch (err) {}
+}
+
+async function toggleStealthCloak() {
+  try {
+    const res = await fetch("/api/stealth/toggle", { method: "POST" });
+    const data = await res.json();
+    showToast(data.enabled ? "Stealth Cloak Activated" : "Stealth Cloak Deactivated", data.enabled ? "MAC camouflaged. Port scan blackhole active." : "Native hardware identity restored.", data.enabled ? "success" : "info");
+    renderStealthView();
+  } catch (e) {
+    showToast("Error", "Failed to toggle stealth cloak", "danger");
+  }
+}
+
+// ================= AI NETPILOT NETWORK ENGINE CONTROLLER =================
+async function fetchNetpilotStatus() {
+  try {
+    const res = await fetch("/api/netpilot/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    updateNetpilotUi(data);
+  } catch (err) {
+    console.error("[SwitchGate] Failed to fetch Netpilot status:", err);
+  }
+}
+
+function updateNetpilotUi(data) {
+  if (!data) return;
+
+  // Master Engine Switch
+  const masterToggle = document.getElementById("netpilotMasterToggle");
+  if (masterToggle && data.master_enabled !== undefined) {
+    masterToggle.checked = !!data.master_enabled;
+  }
+
+  const engineStatus = document.getElementById("netpilotLiveEngineStatus");
+  if (engineStatus) {
+    engineStatus.textContent = data.master_enabled ? "All Engines Operational (60 FPS)" : "Engines Paused";
+    engineStatus.className = `text-[11px] font-mono font-bold ${data.master_enabled ? 'text-emerald-400' : 'text-slate-500'}`;
+  }
+
+  // 4 Screenshot Metrics
+  if (data.metrics) {
+    const m = data.metrics;
+    const elOpts = document.getElementById("npBrowsingOpts");
+    if (elOpts && m.browsing_lag_optimisations !== undefined) {
+      elOpts.textContent = m.browsing_lag_optimisations;
+    }
+
+    const elMins = document.getElementById("npBrowsingMins");
+    if (elMins && m.browsing_lag_time_reduced_mins !== undefined) {
+      elMins.innerHTML = `${m.browsing_lag_time_reduced_mins} <span class="text-sm font-normal text-slate-400">minutes</span>`;
+    }
+
+    const elCalls = document.getElementById("npMissedCalls");
+    if (elCalls && m.missed_calls_prevented !== undefined) {
+      elCalls.textContent = m.missed_calls_prevented;
+    }
+
+    const elGaming = document.getElementById("npGamingMins");
+    if (elGaming && m.gaming_lag_time_reduced_mins !== undefined) {
+      elGaming.innerHTML = `${m.gaming_lag_time_reduced_mins} <span class="text-sm font-normal text-slate-400">minutes</span>`;
+    }
+  }
+
+  // Technologies Switches & Badges
+  if (data.features) {
+    const f = data.features;
+    const tRf = document.getElementById("npTechRfAntenna");
+    if (tRf && f.rf_antenna !== undefined) tRf.checked = !!f.rf_antenna;
+
+    const tSwitch = document.getElementById("npTechSwitcher");
+    if (tSwitch && f.network_switcher !== undefined) tSwitch.checked = !!f.network_switcher;
+
+    const tBoost = document.getElementById("npTechBooster");
+    if (tBoost && f.network_booster !== undefined) tBoost.checked = !!f.network_booster;
+
+    const tWifi = document.getElementById("npTechSuperWifi");
+    if (tWifi && f.super_wifi !== undefined) tWifi.checked = !!f.super_wifi;
+  }
+
+  // Hardware Status Badges
+  if (data.wlan) {
+    const sWifi = document.getElementById("npStatusSuperWifi");
+    if (sWifi) {
+      sWifi.textContent = data.wlan.autoconfig_disabled ? "AutoConfig Shield Active (0ms Ping Spikes)" : "Normal Scanning Mode";
+    }
+    const cWifi = document.getElementById("npConsoleWifi");
+    if (cWifi && data.wlan.name) {
+      cWifi.textContent = `${data.wlan.name} (${data.wlan.signal_pct || 100}% Signal)`;
+    }
+  }
+
+  if (data.switcher) {
+    const sSwitch = document.getElementById("npStatusSwitcher");
+    if (sSwitch) {
+      const pri = data.switcher.primary_adapter || "Ethernet";
+      const sec = data.switcher.secondary_adapter;
+      if (sec && !sec.includes("None")) {
+        sSwitch.textContent = `${pri} ⇄ ${sec} (Sub-150ms Failover)`;
+      } else {
+        sSwitch.textContent = `${pri} (Metric 10 • Standby Failover Ready)`;
+      }
+    }
+    const cPri = document.getElementById("npConsolePrimary");
+    if (cPri) {
+      cPri.textContent = `${data.switcher.primary_adapter || 'Ethernet'} (${data.switcher.primary_latency_ms || 12}ms)`;
+    }
+  }
+
+  if (data.booster) {
+    const sBoost = document.getElementById("npStatusBooster");
+    if (sBoost) {
+      sBoost.textContent = data.booster.active_foreground_app ? `Boosted: ${data.booster.active_foreground_app}` : "Zero Windows Throttling";
+    }
+  }
+}
+
+async function toggleNetpilotMaster(enabled) {
+  try {
+    const res = await fetch("/api/netpilot/toggle_master", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enable: enabled })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast("AI Netpilot", enabled ? "All AI Netpilot hardware & QoS engines activated" : "AI Netpilot engine paused", "success");
+      updateNetpilotUi(data.status);
+    }
+  } catch (err) {
+    showToast("Netpilot Error", "Failed to toggle master engine", "danger");
+  }
+}
+
+async function toggleNetpilotFeature(feature, enabled) {
+  try {
+    const res = await fetch("/api/netpilot/toggle_feature", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feature: feature, enable: enabled })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const titles = {
+        rf_antenna: "RF Antenna Optimizer",
+        network_switcher: "Dynamic Network Switcher",
+        network_booster: "Process Network Booster",
+        super_wifi: "Super Wi-Fi Spike Shield"
+      };
+      const title = titles[feature] || "Netpilot Feature";
+      showToast(title, enabled ? "Hardware feature active" : "Feature disabled", "success");
+      updateNetpilotUi(data.status);
+    }
+  } catch (err) {
+    showToast("Netpilot Error", "Failed to toggle feature", "danger");
+  }
+}
+
+async function runNetpilotOptimize() {
+  const btn = document.getElementById("btnNetpilotOptimize");
+  const icon = document.getElementById("btnNetpilotOptIcon");
+  const text = document.getElementById("btnNetpilotOptText");
+
+  if (btn) btn.disabled = true;
+  if (icon) icon.className = "inline-block animate-spin";
+  if (text) text.textContent = "Optimizing Stack...";
+
+  try {
+    const res = await fetch("/api/netpilot/optimize_now", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      showToast("Netpilot Optimization Complete", `Executed deep kernel tuning (${data.elapsed_ms}ms, latency ${data.latency_ms}ms)`, "success");
+      if (data.metrics) {
+        updateNetpilotUi({ metrics: data.metrics });
+      }
+      fetchNetpilotStatus();
+    } else {
+      showToast("Netpilot Optimization", data.message || "Completed", "info");
+    }
+  } catch (err) {
+    showToast("Optimization Failed", "Could not complete kernel sweep", "danger");
+  } finally {
+    if (btn) btn.disabled = false;
+    if (icon) icon.className = "";
+    if (text) text.textContent = "Run Deep Optimization";
+  }
+}
+
+

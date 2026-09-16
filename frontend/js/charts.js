@@ -186,8 +186,8 @@ class BandwidthWaveformEngine {
       h - 20
     );
 
-    // 5. High-Tech Legend Overlay in Top-Right
-    this.drawLegend(ctx, w);
+    // 5. Legend is handled via crisp DOM overlay in the card header
+    // this.drawLegend(ctx, w);
   }
 
   drawSmoothWave(dataArray, strokeColor, gradStart, gradEnd, lineWidth, baseY) {
@@ -251,23 +251,8 @@ class BandwidthWaveformEngine {
   }
 
   drawLegend(ctx, w) {
-    ctx.save();
-    ctx.font = "700 10px 'JetBrains Mono', monospace";
-    ctx.textAlign = "right";
-
-    // Cyan Legend
-    ctx.fillStyle = "#00f0ff";
-    ctx.fillText("● INBOUND (DL)", w - 180, 20);
-
-    // Green Legend
-    ctx.fillStyle = "#00ff88";
-    ctx.fillText("● kPERF RING", w - 90, 20);
-
-    // Red Legend
-    ctx.fillStyle = "#ff3366";
-    ctx.fillText("● OUTBOUND (UL)", w - 10, 20);
-
-    ctx.restore();
+    // Disabled in favor of crisp DOM header legend
+    return;
   }
 }
 

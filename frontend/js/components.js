@@ -15,6 +15,29 @@ class SoundFX {
         this.ctx = new AudioCtx();
       }
     }
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  playConfirm() {
+    this.init();
+    if (!this.ctx) return;
+    try {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(659.25, this.ctx.currentTime); // E5
+      osc.frequency.exponentialRampToValueAtTime(987.77, this.ctx.currentTime + 0.09); // B5
+
+      gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.12);
+    } catch (e) {}
   }
 
   playSwitchOn() {
@@ -27,13 +50,13 @@ class SoundFX {
       osc.frequency.setValueAtTime(587.33, this.ctx.currentTime); // D5
       osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.08); // A5
 
-      gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.10, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.11);
 
       osc.connect(gain);
       gain.connect(this.ctx.destination);
       osc.start();
-      osc.stop(this.ctx.currentTime + 0.12);
+      osc.stop(this.ctx.currentTime + 0.11);
     } catch (e) {}
   }
 
@@ -47,13 +70,13 @@ class SoundFX {
       osc.frequency.setValueAtTime(320, this.ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(120, this.ctx.currentTime + 0.14);
 
-      gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.14);
 
       osc.connect(gain);
       gain.connect(this.ctx.destination);
       osc.start();
-      osc.stop(this.ctx.currentTime + 0.15);
+      osc.stop(this.ctx.currentTime + 0.14);
     } catch (e) {}
   }
 
@@ -82,6 +105,9 @@ window.soundFX = new SoundFX();
 
 // Modern Luxury Glassmorphism Toast Engine
 function showToast(title, message, type = "info") {
+  if (window.soundFX && typeof window.soundFX.playConfirm === "function") {
+    try { window.soundFX.playConfirm(); } catch(e) {}
+  }
   const container = document.getElementById("toastContainer");
   if (!container) return;
 

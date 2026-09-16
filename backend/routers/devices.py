@@ -125,3 +125,17 @@ async def rename_device(mac: str, req: RenameRequest):
     _notify_state_change()
     return {"status": "success", "mac": mac, "new_name": req.custom_name}
 
+
+@router.post("/scan")
+async def trigger_network_scan():
+    """Triggers an instant UPnP SSDP + Win32 ARP discovery sweep across the router network."""
+    from backend.core.scanner import scanner
+    devices = scanner.scan_network()
+    _notify_state_change()
+    return {
+        "status": "success",
+        "total_devices": len(devices),
+        "devices": devices
+    }
+
+

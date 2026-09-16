@@ -187,7 +187,15 @@ class Database:
             row = cursor.fetchone()
             
             if row:
-                cursor.execute("UPDATE devices SET ip = ?, status = 'ONLINE', last_seen = ? WHERE mac = ?", (ip, now, mac))
+                existing_name = row["custom_name"] or ""
+                if not existing_name or "Generic" in existing_name or existing_name == ip or existing_name == "Main Wi-Fi Router (Gateway)":
+                    cursor.execute("""
+                        UPDATE devices 
+                        SET ip = ?, custom_name = ?, vendor = ?, device_type = ?, status = 'ONLINE', last_seen = ? 
+                        WHERE mac = ?
+                    """, (ip, suggested_name, vendor, device_type, now, mac))
+                else:
+                    cursor.execute("UPDATE devices SET ip = ?, status = 'ONLINE', last_seen = ? WHERE mac = ?", (ip, now, mac))
             else:
                 cursor.execute("""
                 INSERT INTO devices 
@@ -213,6 +221,26 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM devices ORDER BY is_banned ASC, is_blocked ASC, status ASC, ip ASC")
             return [dict(row) for row in cursor.fetchall()]
+
+    def update_device_status(self, mac: str, status: str, status_label: Optional[str] = None):
+        mac = mac.lower().replace("-", ":")
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if status_label:
+                cursor.execute("UPDATE devices SET status = ?, status_label = ? WHERE mac = ?", (status, status_label, mac))
+            else:
+                cursor.execute("UPDATE devices SET status = ? WHERE mac = ?", (status, mac))
+            conn.commit()
+
+    def cleanup_old_subnet_devices(self, current_cidr: str):
+        """Marks devices from past network connections as OFFLINE so they do not clutter active list."""
+        if not current_cidr or "/" not in current_cidr:
+            return
+        net_base = current_cidr.split("/")[0].rsplit(".", 1)[0] + "."
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE devices SET status = 'OFFLINE', status_label = 'Offline (Past Session)' WHERE ip NOT LIKE ? AND ip != '0.0.0.0' AND is_banned = 0", (f"{net_base}%",))
+            conn.commit()
 
     def get_device(self, mac: str) -> Optional[Dict[str, Any]]:
         mac = mac.lower().replace("-", ":")

@@ -15,6 +15,7 @@ from backend.config import AppConfig
 from backend.database import db
 from backend.kperf.kperf_engine import kperf_engine
 from backend.native.network_engine import native_engine
+from backend.core.silent_process import silent_run
 
 # Scapy is imported lazily inside start() — NOT at module load time
 # This saves 2-3 seconds of startup delay
@@ -24,7 +25,7 @@ _scapy_Ether = None
 _scapy_sendp = None
 
 def _load_scapy():
-    """Lazy-load Scapy on first use (not at import time)."""
+    """Lazy-load Scapy on first use (not at import time). Gracefully detects if Npcap is missing."""
     global SCAPY_AVAILABLE, _scapy_ARP, _scapy_Ether, _scapy_sendp
     if SCAPY_AVAILABLE:
         return True
@@ -34,12 +35,17 @@ def _load_scapy():
         logging.getLogger("scapy").setLevel(logging.ERROR)
         from scapy.all import ARP, Ether, sendp, conf
         conf.verb = 0
+        # If running on Windows without Npcap/WinPcap, conf.use_pcap is False
+        if sys.platform == "win32" and not getattr(conf, "use_pcap", True):
+            SCAPY_AVAILABLE = False
+            return False
         _scapy_ARP   = ARP
         _scapy_Ether = Ether
         _scapy_sendp = sendp
         SCAPY_AVAILABLE = True
         return True
     except Exception:
+        SCAPY_AVAILABLE = False
         return False
 
 class BlockerEngine:
@@ -302,34 +308,44 @@ class BlockerEngine:
             pass
 
     def _add_firewall_rule(self, ip: str):
-        """Applies OS-level firewall packet drop."""
+        """Applies OS-level firewall packet drop & ARP blackhole."""
         system = platform.system()
         try:
             if system == "Linux":
-                subprocess.run(["iptables", "-I", "FORWARD", "-s", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["iptables", "-I", "FORWARD", "-d", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["iptables", "-I", "FORWARD", "-s", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["iptables", "-I", "FORWARD", "-d", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif system == "Windows":
-                rule_name = f"SwitchGate_Block_{ip.replace('.', '_')}"
-                subprocess.run([
+                rule_out = f"SwitchGate_Block_{ip.replace('.', '_')}_Out"
+                rule_in  = f"SwitchGate_Block_{ip.replace('.', '_')}_In"
+                silent_run([
                     "netsh", "advfirewall", "firewall", "add", "rule",
-                    f"name={rule_name}", "dir=out", "action=block", f"remoteip={ip}"
+                    f"name={rule_out}", "dir=out", "action=block", f"remoteip={ip}", "enable=yes", "profile=any"
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run([
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    f"name={rule_in}", "dir=in", "action=block", f"remoteip={ip}", "enable=yes", "profile=any"
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                iface = AppConfig.INTERFACE_NAME
+                if iface:
+                    silent_run(["netsh", "interface", "ipv4", "set", "neighbors", iface, ip, "00-00-00-00-00-00"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
     def _remove_firewall_rule(self, ip: str):
-        """Removes OS-level firewall packet drop."""
+        """Removes OS-level firewall packet drop & ARP blackhole."""
         system = platform.system()
         try:
             if system == "Linux":
-                subprocess.run(["iptables", "-D", "FORWARD", "-s", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["iptables", "-D", "FORWARD", "-d", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["iptables", "-D", "FORWARD", "-s", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["iptables", "-D", "FORWARD", "-d", ip, "-j", "DROP"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif system == "Windows":
-                rule_name = f"SwitchGate_Block_{ip.replace('.', '_')}"
-                subprocess.run([
-                    "netsh", "advfirewall", "firewall", "delete", "rule",
-                    f"name={rule_name}"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                rule_out = f"SwitchGate_Block_{ip.replace('.', '_')}_Out"
+                rule_in  = f"SwitchGate_Block_{ip.replace('.', '_')}_In"
+                silent_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_out}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_in}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                iface = AppConfig.INTERFACE_NAME
+                if iface:
+                    silent_run(["netsh", "interface", "ipv4", "delete", "neighbors", iface, ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 

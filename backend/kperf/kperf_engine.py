@@ -13,6 +13,7 @@ import platform
 import subprocess
 import threading
 from typing import Dict, List, Any, Optional, Tuple, Set
+from backend.core.silent_process import silent_run
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -323,7 +324,7 @@ class KPerfHypervisor:
                 pass
         try:
             if IS_WINDOWS:
-                subprocess.run(["ipconfig", "/flushdns"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["ipconfig", "/flushdns"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except Exception:
             return False

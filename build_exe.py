@@ -30,9 +30,7 @@ def build():
     ssd_dist_dir = SSD_BUILD_ROOT / "dist"
     ssd_work_dir = SSD_BUILD_ROOT / "build"
 
-    # Clean previous artifacts on both drives
-    if f_dist_dir.exists():
-        shutil.rmtree(f_dist_dir, ignore_errors=True)
+    # Clean previous artifacts on SSD and build directory
     if f_build_dir.exists():
         shutil.rmtree(f_build_dir, ignore_errors=True)
     if SSD_BUILD_ROOT.exists():
@@ -111,6 +109,12 @@ def build():
         "--collect-all=dnslib",
         "--collect-all=websockets",
         "--collect-all=crashpad",
+        "--collect-all=httpx",
+        "--collect-all=httpcore",
+        "--collect-all=requests",
+        "--collect-all=colorama",
+        "--collect-all=orjson",
+        "--collect-all=backend",
 
         # Standard library & core hidden imports
         "--hidden-import=unicodedata",
@@ -152,6 +156,10 @@ def build():
         "--hidden-import=backend.core.url_controller",
         "--hidden-import=backend.core.blackhole_proxy",
         "--hidden-import=backend.core.oui_database",
+        "--hidden-import=backend.core.ai_netpilot",
+        "--hidden-import=backend.core.gemini_sentinel",
+        "--hidden-import=backend.core.qos_engine",
+        "--hidden-import=backend.core.stealth_engine",
         "--hidden-import=backend.adblock",
         "--hidden-import=backend.adblock.adblock_engine",
         "--hidden-import=backend.adblock.rules",
@@ -172,6 +180,11 @@ def build():
         "--hidden-import=backend.routers.apps",
         "--hidden-import=backend.routers.websites",
         "--hidden-import=backend.routers.kperf",
+        "--hidden-import=backend.routers.speedtest",
+        "--hidden-import=backend.routers.gemini_sentinel",
+        "--hidden-import=backend.routers.qos",
+        "--hidden-import=backend.routers.stealth",
+        "--hidden-import=backend.routers.ai_netpilot",
 
         # Firewall modules
         "--hidden-import=firewall",
@@ -205,7 +218,7 @@ def build():
         target_f_app = f_dist_dir / "SwitchGate"
 
         print(f"[*] Moving compiled binary to workspace: {target_f_app}...")
-        subprocess.run(f'robocopy "{compiled_ssd_app}" "{target_f_app}" /E /MT:16', shell=True)
+        subprocess.run(f'robocopy "{compiled_ssd_app}" "{target_f_app}" /MIR /MT:32 /R:0 /W:0 /NP /NFL /NDL /NJS /NJH', shell=True)
 
         internal_dir = target_f_app / "_internal"
         internal_webview_lib = internal_dir / "webview" / "lib"
@@ -269,18 +282,63 @@ def build():
 
         # 5. Stage Frontend Directory
         target_frontend = target_f_app / "frontend"
-        if not target_frontend.exists() and frontend_dir.exists():
+        if target_frontend.exists():
+            shutil.rmtree(target_frontend)
+        if frontend_dir.exists():
             shutil.copytree(frontend_dir, target_frontend)
             print(f"[+] Staged frontend in {target_frontend}.")
+
+        # 6. Stage Auto-Start & Helper Scripts
+        if (BASE_DIR / "auto_start_setup.py").exists():
+            shutil.copy2(BASE_DIR / "auto_start_setup.py", target_f_app / "auto_start_setup.py")
+
+        launcher_bat = target_f_app / "Launch SwitchGate (Admin).bat"
+        launcher_bat.write_text(
+            '@echo off\r\n'
+            'cd /d "%~dp0"\r\n'
+            'powershell -Command "Start-Process \'.\\SwitchGate.exe\' -Verb RunAs"\r\n',
+            encoding="utf-8"
+        )
+        print("[+] Created convenience admin launcher batch script.")
+
+        readme_txt = target_f_app / "HOW_TO_USE.txt"
+        readme_txt.write_text(
+            "===============================================================\r\n"
+            "   SWITCHGATE NETWORK CONTROLLER & REMOTE GATEWAY v2.0\r\n"
+            "===============================================================\r\n\r\n"
+            "HOW TO USE ON THIS PC OR ANY OTHER WINDOWS PC:\r\n\r\n"
+            "1. Double-click 'SwitchGate.exe' or 'Launch SwitchGate (Admin).bat'.\r\n"
+            "2. When prompted by Windows UAC, click 'Yes' to grant network permissions.\r\n"
+            "3. SwitchGate will launch into its standalone cyberpunk desktop interface.\r\n"
+            "4. System Tray: An icon will remain in your system tray for quick access\r\n"
+            "   and emergency network pause.\r\n\r\n"
+            "MULTI-PC PORTABILITY:\r\n"
+            "- You can copy this entire folder (or 'SwitchGate-v2.0-Standalone-Win64.zip')\r\n"
+            "  to any USB drive and run on other Windows 10/11 64-bit computers.\r\n"
+            "- Zero installer or runtime installations required (100% self-contained).\r\n"
+            "- Zero Npcap required (uses native Windows Kernel NDIS API).\r\n"
+            "===============================================================\r\n",
+            encoding="utf-8"
+        )
+        print("[+] Created HOW_TO_USE.txt documentation.")
 
         # Clean SSD temporary build directory
         print("[*] Cleaning up SSD temporary build files...")
         shutil.rmtree(SSD_BUILD_ROOT, ignore_errors=True)
 
+        # 7. Create Standalone Portable ZIP Package
+        zip_output_base = f_dist_dir / "SwitchGate-v2.0-Standalone-Win64"
+        print(f"[*] Compressing standalone distribution into {zip_output_base}.zip...")
+        shutil.make_archive(str(zip_output_base), "zip", f_dist_dir, "SwitchGate")
+        zip_file = f_dist_dir / "SwitchGate-v2.0-Standalone-Win64.zip"
+        zip_size_mb = zip_file.stat().st_size / (1024 * 1024) if zip_file.exists() else 0.0
+
         exe_path = target_f_app / "SwitchGate.exe"
+        exe_size_mb = exe_path.stat().st_size / (1024 * 1024) if exe_path.exists() else 0.0
         print("\n==================================================")
         print("   ✅ STANDALONE NATIVE APP COMPILED SUCCESSFULLY!")
-        print(f"   Executable Location: {exe_path}               ")
+        print(f"   Executable Location: {exe_path} ({exe_size_mb:.1f} MB)")
+        print(f"   Portable ZIP Package: {zip_file} ({zip_size_mb:.1f} MB)")
         print("==================================================")
         return True
     else:

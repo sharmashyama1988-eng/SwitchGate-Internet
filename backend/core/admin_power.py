@@ -78,13 +78,14 @@ class AdminPowerEngine:
         Runs a shell command guaranteed to execute with Administrator rights.
         Uses powershell Start-Process -Verb RunAs when not already elevated.
         """
+        from backend.core.silent_process import silent_run
         if self._is_admin():
-            return subprocess.run(cmd, capture_output=capture,
-                                  stdout=subprocess.DEVNULL if not capture else None,
-                                  stderr=subprocess.DEVNULL if not capture else None)
+            return silent_run(cmd, capture_output=capture,
+                              stdout=subprocess.DEVNULL if not capture else None,
+                              stderr=subprocess.DEVNULL if not capture else None)
         # Wrap via PowerShell elevation
         ps_cmd = " ".join(f'"{c}"' for c in cmd)
-        return subprocess.run(
+        return silent_run(
             ["powershell", "-WindowStyle", "Hidden", "-Command",
              f"Start-Process powershell -ArgumentList '-Command {ps_cmd}' -Verb RunAs -WindowStyle Hidden"],
             capture_output=capture
@@ -95,14 +96,15 @@ class AdminPowerEngine:
         Runs a netsh command with guaranteed admin rights (no UAC prompt).
         Returns True on success.
         """
+        from backend.core.silent_process import silent_run
         cmd = ["netsh"] + list(args)
         if self._is_admin():
-            r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            r = silent_run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return r.returncode == 0
         # Encode as base64 to avoid quote hell in PowerShell
         import base64
         encoded = base64.b64encode((" ".join(cmd)).encode("utf-16-le")).decode()
-        r = subprocess.run(
+        r = silent_run(
             ["powershell", "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
@@ -257,40 +259,10 @@ class AdminPowerEngine:
 
     def _ensure_npcap(self):
         """
-        Checks whether Npcap (required by Scapy for ARP packet injection) is installed.
-        If absent, downloads and installs it silently with no user interaction.
+        No-op: SwitchGate uses native Windows API (iphlpapi.dll), WFP, and netsh,
+        so external Npcap installation is omitted to prevent setup popups.
         """
-        if not IS_WINDOWS or self._npcap_checked:
-            return
-        self._npcap_checked = True
-
-        npcap_dll = Path(r"C:\Windows\System32\Npcap\wpcap.dll")
-        npcap_dll2 = Path(r"C:\Windows\SysWOW64\wpcap.dll")
-
-        if npcap_dll.exists() or npcap_dll2.exists():
-            return  # Already installed
-
-        print("[AdminPower] Npcap not detected — scheduling silent background install...")
-        try:
-            import urllib.request
-            import tempfile
-
-            # Npcap public installer from npcap.com (latest stable)
-            npcap_url = "https://npcap.com/dist/npcap-1.80.exe"
-            installer_path = Path(tempfile.gettempdir()) / "npcap_installer.exe"
-
-            if not installer_path.exists():
-                print("[AdminPower] Downloading Npcap installer (~2 MB)...")
-                urllib.request.urlretrieve(npcap_url, str(installer_path))
-
-            # Silent install: /S = silent, /loopback_support=yes
-            install_cmd = [str(installer_path), "/S", "/loopback_support=yes",
-                           "/winpcap_mode=yes", "/dot11_support=no"]
-            subprocess.run(install_cmd, timeout=60,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("[AdminPower] ✅ Npcap installed successfully. ARP features now active.")
-        except Exception as e:
-            print(f"[AdminPower] Npcap auto-install notice: {e}")
+        pass
 
     # ──────────────────────────────────────────────────────────────────────────
     # Warning Suppression

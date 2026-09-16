@@ -24,7 +24,7 @@ def clean():
     time.sleep(1.0)
 
     # 2. Remove directories on workspace (F:) and SSD (C:)
-    for folder_name in ["build", "dist", "MSIX_Package_Source"]:
+    for folder_name in ["build", "MSIX_Package_Source"]:
         p = BASE_DIR / folder_name
         if p.exists():
             try:
@@ -70,7 +70,7 @@ def rebuild_all():
 
     if success:
         import prepare_msix_folder
-        prepare_msix_folder.prepare_staging()
+        prepare_msix_folder.build_msix_source()
 
         exe_file = BASE_DIR / "dist" / "SwitchGate" / "SwitchGate.exe"
         staging_dir = BASE_DIR / "MSIX_Package_Source"

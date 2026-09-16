@@ -8,7 +8,7 @@
 
 [![Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Download%20Free-0078D4?style=for-the-badge&logo=microsoft&logoColor=white)](https://apps.microsoft.com/detail/9P5GQ7Z98MPV?hl=en-us&gl=IN&ocid=pdpshare)
 [![Windows 10/11](https://img.shields.io/badge/Windows%2010%20%2F%2011-Official%20MSIX-0078D4?style=for-the-badge&logo=windows11&logoColor=white)](https://apps.microsoft.com/detail/9P5GQ7Z98MPV?hl=en-us&gl=IN&ocid=pdpshare)
-[![Version](https://img.shields.io/badge/Version-2.0.2%20(Store%20Edition)-00f5ff?style=for-the-badge)](https://apps.microsoft.com/detail/9P5GQ7Z98MPV?hl=en-us&gl=IN&ocid=pdpshare)
+[![Version](https://img.shields.io/badge/Version-2.0.4%20(Store%20Edition)-00f5ff?style=for-the-badge)](https://apps.microsoft.com/detail/9P5GQ7Z98MPV?hl=en-us&gl=IN&ocid=pdpshare)
 [![License](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)](LICENSE)
 
 <br/>

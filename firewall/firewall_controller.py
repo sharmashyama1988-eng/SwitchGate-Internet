@@ -9,6 +9,7 @@ import platform
 import subprocess
 import threading
 from typing import Dict, List, Any, Optional
+from backend.core.silent_process import silent_run
 
 from firewall.rules_engine import rules_engine, FirewallRulesEngine
 from firewall.antivirus import antivirus, AntivirusScanner
@@ -75,7 +76,7 @@ class FirewallController:
         
         try:
             # Run netsh advfirewall show currentprofile
-            proc = subprocess.run(
+            proc = silent_run(
                 ["netsh", "advfirewall", "show", "currentprofile"],
                 capture_output=True,
                 text=True,
@@ -108,7 +109,7 @@ class FirewallController:
         try:
             # Adjust Windows firewall profile or add SwitchGate port protection
             cmd = ["netsh", "advfirewall", "set", "currentprofile", "state", "on" if enabled else "off"]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3.0)
+            proc = silent_run(cmd, capture_output=True, text=True, timeout=3.0)
             success = proc.returncode == 0
             msg = f"Synchronized with Windows Netsh (Profile: {profile}, State: {'ON' if enabled else 'OFF'})." if success else "Netsh sync completed with user privileges."
             return {"status": "success" if success else "partial", "message": msg, "details": proc.stdout}

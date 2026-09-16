@@ -17,6 +17,7 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Set
+from backend.core.silent_process import silent_run
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -116,9 +117,9 @@ class NativeNetworkEngine:
         # Fallback / redundant shell flush
         try:
             if self.is_windows:
-                subprocess.run(["ipconfig", "/flushdns"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["ipconfig", "/flushdns"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                subprocess.run(["systemd-resolve", "--flush-caches"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["systemd-resolve", "--flush-caches"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             success = True
         except Exception:
             pass

@@ -13,6 +13,7 @@ from typing import Set, Dict, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from backend.config import AppConfig, BASE_DIR, BUNDLE_DIR
@@ -37,6 +38,16 @@ from backend.routers.settings import router as settings_router
 from backend.routers.apps import router as apps_router
 from backend.routers.websites import router as websites_router
 from backend.routers.kperf import router as kperf_router
+from backend.routers.speedtest import router as speedtest_router
+from backend.routers.gemini_sentinel import router as gemini_sentinel_router
+from backend.routers.qos import router as qos_router
+from backend.routers.stealth import router as stealth_router
+from backend.routers.ai_netpilot import router as ai_netpilot_router
+from backend.core.gemini_sentinel import gemini_sentinel
+from backend.core.qos_engine import qos_engine
+from backend.core.stealth_engine import stealth_engine
+from backend.core.ai_netpilot import ai_netpilot
+
 
 
 def get_telemetry_snapshot_sync() -> Dict[str, Any]:
@@ -104,6 +115,26 @@ def get_telemetry_snapshot_sync() -> Dict[str, Any]:
     except Exception:
         fw_metrics = {}
 
+    try:
+        qos_data = qos_engine.get_metrics()
+    except Exception:
+        qos_data = {}
+
+    try:
+        stealth_data = stealth_engine.get_status()
+    except Exception:
+        stealth_data = {}
+
+    try:
+        sentinel_data = gemini_sentinel.get_status()
+    except Exception:
+        sentinel_data = {}
+
+    try:
+        netpilot_data = ai_netpilot.get_status()
+    except Exception:
+        netpilot_data = {}
+
     return {
         "type": "TICK",
         "timestamp": time.time(),
@@ -116,11 +147,16 @@ def get_telemetry_snapshot_sync() -> Dict[str, Any]:
         "emergency_pause": emergency_pause,
         "kperf": kperf_metrics,
         "firewall": fw_metrics,
+        "qos": qos_data,
+        "stealth": stealth_data,
+        "sentinel": sentinel_data,
+        "netpilot": netpilot_data,
         "ad_stats": {
             "total_blocked": ad_stats.get("total_blocked", 0),
             "total_queries": ad_stats.get("total_queries", 0)
         }
     }
+
 
 
 async def get_telemetry_snapshot() -> Dict[str, Any]:
@@ -180,17 +216,17 @@ ws_hub = WebSocketHub()
 
 
 async def live_broadcast_task():
-    """Continuous high-speed telemetry broadcast background worker."""
+    """Continuous high-speed telemetry broadcast background worker (0.5s tick)."""
     while True:
         try:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.5)   # 2× faster updates for snappier UI
             if ws_hub.active_connections:
                 snapshot = await get_telemetry_snapshot()
                 await ws_hub.broadcast(snapshot)
         except asyncio.CancelledError:
             break
         except Exception:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.5)
 
 
 from backend.core.activator import activator
@@ -227,6 +263,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=500)  # Compress responses > 500 bytes
 
 from firewall.firewall_router import router as firewall_router
 
@@ -241,6 +278,12 @@ app.include_router(intruders_router)
 app.include_router(ghost_leaks_router)
 app.include_router(settings_router)
 app.include_router(firewall_router)
+app.include_router(speedtest_router)
+app.include_router(gemini_sentinel_router)
+app.include_router(qos_router)
+app.include_router(stealth_router)
+app.include_router(ai_netpilot_router)
+
 
 
 @app.get("/api/telemetry/live", response_model=Dict[str, Any])
@@ -296,4 +339,15 @@ async def serve_index():
     if index_file.exists():
         return FileResponse(index_file)
     return {"message": "SwitchGate API is running."}
+
+
+@app.get("/favicon.ico")
+async def serve_favicon():
+    icon_file = assets_dir / "icon.ico"
+    if icon_file.exists():
+        return FileResponse(icon_file)
+    png_icon = assets_dir / "Square44x44Logo.png"
+    if png_icon.exists():
+        return FileResponse(png_icon)
+    return JSONResponse(status_code=204, content=None)
 

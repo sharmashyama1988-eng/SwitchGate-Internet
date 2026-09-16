@@ -1,0 +1,76 @@
+﻿# SwitchGate Internet - Real Technical Store Listing (English - US)
+# Policy 10.1.4.3 Fix: Factual, Clean, Non-Marketing Description
+
+================================================================================
+FIELD: Description (Copy from below)
+================================================================================
+SwitchGate Internet is a local network management and monitoring desktop application for Windows 10 and Windows 11. It allows you to monitor devices connected to your local Wi-Fi or Ethernet network, track traffic, and control internet access for individual devices directly from your computer without accessing your router administration page.
+
+WHAT THE APP DOES:
+
+1. Local Network Device Discovery:
+The application scans your local IPv4 subnet using ARP requests and network cache tables to identify all active devices. For each detected device, it displays:
+- Assigned local IP address
+- Hardware MAC address
+- Hardware manufacturer / vendor (identified via standard OUI database lookup)
+- Current connection state and response latency
+
+2. Device Internet Access Control:
+You can pause or restore internet connectivity for individual connected devices (such as smart TVs, phones, tablets, or consoles) on your local network. When paused, the device's internet traffic is routed locally through layer-2 ARP management without affecting other devices on the network. A one-click panic lockdown toggle is also available to pause internet traffic across all managed devices at once.
+
+3. Live Traffic & Latency Monitoring:
+The dashboard displays real-time telemetry of your network connection:
+- Upload and download throughput graphs
+- Local ping latency and packet statistics
+- Active device counts and bandwidth utilization
+
+4. Local DNS Ad & Tracker Blocking:
+SwitchGate includes an internal lightweight DNS sinkhole service. When enabled, it resolves DNS queries locally and drops requests destined for known advertising and telemetry tracker domains.
+
+5. Scheduling & Access Timers:
+Set scheduled cutoff hours or temporary countdown timers (such as 15 minutes, 30 minutes, or 1 hour) for specific devices to automate internet disconnection during bedtime or focus hours.
+
+6. Application & Website Restrictions:
+- Windows Application Shield: Manage outbound internet access for individual installed Windows executable programs using the Windows Firewall API.
+- Website Shield: Block specific domain names from being resolved on the local network.
+
+7. Built-in Network Speed Test:
+Run integrated speed tests directly from the application interface to measure current download speed, upload speed, and round-trip ping latency.
+
+TECHNICAL REQUIREMENTS & PERMISSIONS:
+- Operating System: Windows 10 (version 1809 / build 17763 or newer) or Windows 11 (64-bit).
+- Administrator Privileges: Required on startup. Network device discovery (ARP scanning), layer-2 routing, and Windows Firewall rule management require elevated administrative permissions.
+- Network: Standard IPv4 local area network over Wi-Fi or Ethernet.
+
+PRIVACY & LOCAL PROCESSING:
+SwitchGate Internet operates entirely on your local PC. All network discovery, traffic monitoring, and blocking operations execute on your machine. The app does not require user registration, does not transmit network logs to external servers, and does not collect personal data.
+================================================================================
+
+
+================================================================================
+FIELD: Features (Bullet points for Partner Center)
+================================================================================
+- Automatic local network scanning to detect connected devices (IP, MAC, and vendor)
+- Toggle internet access on or off for individual local network devices
+- Real-time network bandwidth monitoring with upload, download, and ping graphs
+- Local DNS sinkhole to block ad and telemetry domains on your network
+- Bedtime schedules and countdown timers for automated device disconnection
+- Per-application internet blocking through Windows Firewall management
+- Website domain blocking tool to restrict specific web addresses
+- One-click lockdown button to pause internet across all managed devices
+- Integrated speed test utility to measure network latency and throughput
+- 100% local processing with zero external data collection or cloud accounts
+================================================================================
+
+
+================================================================================
+FIELD: Search terms (Keywords)
+================================================================================
+network monitor
+device manager
+parental control
+bandwidth monitor
+wifi scanner
+firewall tool
+local network
+================================================================================

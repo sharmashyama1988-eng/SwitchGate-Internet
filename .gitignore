@@ -46,3 +46,5 @@ desktop.ini
 SwitchGate_SSD_Build/
 *.tmp
 npcap_installer.exe
+tools/bin/
+*.pdf

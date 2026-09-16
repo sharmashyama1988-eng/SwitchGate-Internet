@@ -1,7 +1,10 @@
 """
-SwitchGate - Real-Time Live Website / URL Domain Tracker & Circuit Breaker (PAC & WinINet Powered)
-Detects live domains visited on the system and provides instant 1-Click ON/OFF Internet Control
-per website and per browser with zero freezing and zero crashes.
+SwitchGate - Real-Time Live Website / URL Domain Tracker & Circuit Breaker v2.5
+Multi-Layered Enforcement:
+  1. Windows Defender Firewall IP & Port 80/443 Blocking (TCP & UDP/QUIC Dropper)
+  2. Active TCP Socket Circuit Breaking (kPerf)
+  3. Windows PAC & WinINet Proxy Blackholing
+  4. Sub-second DNS Cache Invalidation
 """
 import os
 import sys
@@ -9,6 +12,7 @@ import time
 import socket
 import psutil
 import platform
+import subprocess
 import threading
 from typing import Dict, List, Any, Optional, Set
 from pathlib import Path
@@ -16,6 +20,7 @@ from backend.config import AppConfig
 from backend.database import db
 from backend.kperf.kperf_engine import kperf_engine
 from backend.native.network_engine import native_engine
+from backend.core.silent_process import silent_run
 
 IS_WINDOWS = platform.system() == "Windows"
 if IS_WINDOWS:
@@ -67,6 +72,7 @@ DOMAIN_MATRICES: Dict[str, List[str]] = {
     ]
 }
 
+
 class WebsiteUrlController:
     def __init__(self):
         self.live_websites: Dict[str, Dict[str, Any]] = {}
@@ -77,6 +83,36 @@ class WebsiteUrlController:
         self._stop_event = threading.Event()
         self._sync_thread: Optional[threading.Thread] = None
         self._init_tracked_sites()
+        self._load_saved_rules()
+
+    def _init_tracked_sites(self):
+        for domain in DOMAIN_MATRICES.keys():
+            self.live_websites[domain] = {
+                "domain": domain,
+                "friendly_name": domain.split(".")[0].title(),
+                "category": "Popular Web Platform",
+                "company": domain.split(".")[0].title(),
+                "hits": 0,
+                "last_seen": "Offline / Standby",
+                "is_blocked": False
+            }
+
+    def _load_saved_rules(self):
+        try:
+            saved_rules = db.get_adblock_rules()
+            for r in saved_rules:
+                if r.get("category") == "website_block":
+                    dom = r.get("domain", "").lower().strip()
+                    if dom:
+                        targets = DOMAIN_MATRICES.get(dom, [dom, f"www.{dom}"])
+                        for d in targets:
+                            self.blocked_domains.add(d)
+                        if dom in self.live_websites:
+                            self.live_websites[dom]["is_blocked"] = True
+            if self.blocked_domains:
+                self._apply_firewall_and_pac()
+        except Exception as e:
+            print(f"[URL Controller] Load saved rules notice: {e}")
 
     def start(self):
         with self._lock:
@@ -87,7 +123,7 @@ class WebsiteUrlController:
         kperf_engine.start()
         self._sync_thread = threading.Thread(target=self._sync_kperf_domains, daemon=True, name="SwitchGate-URLSync")
         self._sync_thread.start()
-        print("[URL Controller] Windows PAC & WinINet Website Circuit Breaker active.")
+        print("[URL Controller] ✅ Multi-Layered Website Firewall & Circuit Breaker active.")
 
     def stop(self):
         self._stop_event.set()
@@ -99,122 +135,59 @@ class WebsiteUrlController:
                 pass
         self._clear_windows_pac()
 
-    def _init_tracked_sites(self):
-        default_sites = [
-            ("youtube.com", "Video Streaming", "Google LLC"),
-            ("instagram.com", "Social Media", "Meta Platforms"),
-            ("facebook.com", "Social Media", "Meta Platforms"),
-            ("netflix.com", "Video Streaming", "Netflix Inc."),
-            ("tiktok.com", "Social Media", "ByteDance"),
-            ("reddit.com", "Social Media", "Reddit Inc."),
-            ("github.com", "Developer Tools", "Microsoft"),
-            ("openai.com", "Artificial Intelligence", "OpenAI"),
-            ("twitter.com", "Social Media", "X Corp"),
-            ("spotify.com", "Music Streaming", "Spotify AB"),
-            ("roblox.com", "Online Gaming", "Roblox Corp"),
-            ("amazon.com", "E-Commerce", "Amazon Inc.")
-        ]
-        now = time.strftime("%H:%M:%S")
-
-        for domain, category, company in default_sites:
-            is_blocked = db.is_domain_blocked(domain)
-            if is_blocked:
-                self.blocked_domains.add(domain)
-                for sub in DOMAIN_MATRICES.get(domain, []):
-                    self.blocked_domains.add(sub)
-
-            self.live_websites[domain] = {
-                "domain": domain,
-                "friendly_name": domain.split(".")[0].title(),
-                "category": category,
-                "company": company,
-                "hits": 1 if not is_blocked else 0,
-                "last_seen": now,
-                "is_blocked": is_blocked
-            }
-
-        if self.blocked_domains:
-            self._apply_windows_pac()
-
-    def set_browser_block_all(self, enable: bool):
-        """Toggles global browser block via PAC script."""
-        with self._lock:
-            self.browser_block_all = enable
-
-        if enable or self.blocked_domains:
-            self._apply_windows_pac()
-        else:
-            self._clear_windows_pac()
-
-        native_engine.flush_dns()
+    def _sync_kperf_domains(self):
+        while not self._stop_event.is_set():
+            try:
+                active_domains = kperf_engine.get_active_domains()
+                with self._lock:
+                    for item in active_domains:
+                        domain = item.get("domain", "").lower().strip()
+                        if not domain or len(domain) < 3:
+                            continue
+                        if domain not in self.live_websites:
+                            parts = domain.split(".")
+                            friendly = parts[-2].title() if len(parts) >= 2 else domain.title()
+                            self.live_websites[domain] = {
+                                "domain": domain,
+                                "friendly_name": friendly,
+                                "category": "Dynamic Live Browsing",
+                                "company": friendly,
+                                "hits": item.get("hits", 1),
+                                "last_seen": item.get("last_seen", time.strftime("%H:%M:%S")),
+                                "is_blocked": domain in self.blocked_domains
+                            }
+                        else:
+                            self.live_websites[domain]["hits"] = item.get("hits", self.live_websites[domain]["hits"] + 1)
+                            self.live_websites[domain]["last_seen"] = item.get("last_seen", time.strftime("%H:%M:%S"))
+                            self.live_websites[domain]["is_blocked"] = domain in self.blocked_domains
+            except Exception:
+                pass
+            time.sleep(1.0)
 
     def get_live_websites(self) -> List[Dict[str, Any]]:
         with self._lock:
             sites = list(self.live_websites.values())
-            sites.sort(key=lambda x: (x["is_blocked"], -x["hits"]))
-            return sites
+        sites.sort(key=lambda x: (not x["is_blocked"], x["hits"]), reverse=True)
+        return sites
 
-    def generate_pac_script(self) -> str:
-        """Generates dynamic Proxy Auto-Configuration (PAC) script with instant ad-purge."""
-        with self._lock:
-            block_all = self.browser_block_all
-            blocked_list = list(self.blocked_domains)
-
-        if block_all:
-            return """function FindProxyForURL(url, host) {
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return "DIRECT";
-    return "PROXY 127.0.0.1:9999; DIRECT";
-}
-"""
-
-        # Fetch active adblock domains from Adblock-Rust Engine
-        ad_domains = []
-        try:
-            from backend.adblock.adblock_engine import adblock_engine
-            if adblock_engine.enabled:
-                ad_domains = list(adblock_engine.blocked_domain_set)
-        except Exception:
-            ad_domains = []
-
-        all_blocked = sorted(list(set(blocked_list + ad_domains)))
-
-        if not all_blocked:
-            return "function FindProxyForURL(url, host) { return 'DIRECT'; }\n"
-
-        # Build high-speed JS object lookup for sublinear performance in browser
-        ad_dict_entries = ", ".join([f'"{d}":1' for d in all_blocked])
-
-        pac_code = f"""// SwitchGate Superintelligent PAC & Ad-Purge Circuit Breaker
-var BLOCKED_DOMAINS = {{{ad_dict_entries}}};
-
-function FindProxyForURL(url, host) {{
-    if (!host || host === "localhost" || host === "127.0.0.1" || host === "::1") return "DIRECT";
-    host = host.toLowerCase();
-
-    // 1. Direct O(1) Exact Match
-    if (BLOCKED_DOMAINS[host]) {{
-        return "PROXY 127.0.0.1:9999; DIRECT";
-    }}
-
-    // 2. Fast Subdomain Traversal
-    var dotIdx = host.indexOf('.');
-    while (dotIdx !== -1) {{
-        var sub = host.substring(dotIdx + 1);
-        if (BLOCKED_DOMAINS[sub]) {{
-            return "PROXY 127.0.0.1:9999; DIRECT";
-        }}
-        dotIdx = host.indexOf('.', dotIdx + 1);
-    }}
-
-    // 3. YouTube Ad / Stats Endpoint Interception
-    if (host.indexOf("video-ad-stats") !== -1 || host.indexOf("googleads") !== -1 || host.indexOf("pagead2") !== -1) {{
-        return "PROXY 127.0.0.1:9999; DIRECT";
-    }}
-
-    return "DIRECT";
-}}
-"""
-        return pac_code
+    def _resolve_domain_ips(self, domain: str) -> List[str]:
+        """Resolves all IPv4 addresses associated with a domain and its common subdomains."""
+        ips = set()
+        subdomains = DOMAIN_MATRICES.get(domain, [domain, f"www.{domain}"])
+        for sub in subdomains:
+            try:
+                infos = socket.getaddrinfo(sub, 443, socket.AF_INET, socket.SOCK_STREAM)
+                for item in infos:
+                    ips.add(item[4][0])
+            except Exception:
+                pass
+            try:
+                infos80 = socket.getaddrinfo(sub, 80, socket.AF_INET, socket.SOCK_STREAM)
+                for item in infos80:
+                    ips.add(item[4][0])
+            except Exception:
+                pass
+        return list(ips)
 
     def toggle_website(self, domain: str, action: str) -> bool:
         domain = domain.lower().strip().replace("http://", "").replace("https://", "").rstrip("/")
@@ -222,13 +195,14 @@ function FindProxyForURL(url, host) {{
         is_blocked = action_upper == "OFF"
 
         target_domains = DOMAIN_MATRICES.get(domain, [domain, f"www.{domain}"])
+        clean_name = domain.replace(".", "_").replace("-", "_")
 
         with self._lock:
             if is_blocked:
                 for d in target_domains:
                     self.blocked_domains.add(d)
                 db.add_adblock_rule(domain, category="website_block")
-                db.add_log("SITE_BLOCK", "", "", f"Switched Website OFF: {domain} (Routed to blackhole across all browsers)")
+                db.add_log("SITE_BLOCK", "", "", f"Switched Website OFF: {domain} (Blocked in Windows Kernel & PAC)")
             else:
                 for d in target_domains:
                     self.blocked_domains.discard(d)
@@ -248,13 +222,97 @@ function FindProxyForURL(url, host) {{
                     "is_blocked": is_blocked
                 }
 
+        # ── 1. Real Windows Firewall IP Rules (TCP & UDP QUIC) ────────────────
+        if IS_WINDOWS:
+            rule_tcp = f"SwitchGate_Web_{clean_name}_TCP"
+            rule_udp = f"SwitchGate_Web_{clean_name}_UDP"
+            rule_in  = f"SwitchGate_Web_{clean_name}_In"
+
+            if is_blocked:
+                resolved_ips = self._resolve_domain_ips(domain)
+                if resolved_ips:
+                    ip_str = ",".join(resolved_ips)
+                    # Block TCP Outbound (Port 80, 443, 8080)
+                    silent_run(
+                        ["netsh", "advfirewall", "firewall", "add", "rule",
+                         f"name={rule_tcp}", "dir=out", "action=block",
+                         "protocol=TCP", "remoteport=80,443,8080,8443", f"remoteip={ip_str}",
+                         "enable=yes", "profile=any"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    # Block UDP Outbound (QUIC Protocol - Port 80, 443, 8080)
+                    silent_run(
+                        ["netsh", "advfirewall", "firewall", "add", "rule",
+                         f"name={rule_udp}", "dir=out", "action=block",
+                         "protocol=UDP", "remoteport=80,443,8080,8443", f"remoteip={ip_str}",
+                         "enable=yes", "profile=any"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    # Block Inbound from these IPs
+                    silent_run(
+                        ["netsh", "advfirewall", "firewall", "add", "rule",
+                         f"name={rule_in}", "dir=in", "action=block",
+                         f"remoteip={ip_str}", "enable=yes", "profile=any"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                    # Kill active browser sockets to these IPs
+                    kperf_engine.kill_sockets_by_remote_ips(resolved_ips)
+                    print(f"[URL Controller] ✅ Windows Firewall blocked {len(resolved_ips)} IPs for {domain} (TCP+UDP QUIC).")
+            else:
+                # Remove Firewall Rules on restore
+                silent_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_tcp}"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_udp}"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                silent_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_in}"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"[URL Controller] ✅ Removed Windows Firewall block rules for {domain}.")
+
+        # ── 2. PAC Proxy Circuit Breaker ──────────────────────────────────────
+        self._apply_firewall_and_pac()
+
+        # ── 3. Flush DNS Cache ────────────────────────────────────────────────
+        native_engine.flush_dns()
+        return True
+
+    def _apply_firewall_and_pac(self):
         if self.browser_block_all or self.blocked_domains:
             self._apply_windows_pac()
         else:
             self._clear_windows_pac()
 
-        native_engine.flush_dns()
-        return True
+    def generate_pac_script(self) -> str:
+        """Generates dynamic PAC script that routes blocked domains to 127.0.0.1:18888 blackhole."""
+        with self._lock:
+            all_blocked = set(self.blocked_domains)
+            if self.browser_block_all:
+                return "function FindProxyForURL(url, host) { return 'PROXY 127.0.0.1:18888'; }\n"
+
+        if not all_blocked:
+            return "function FindProxyForURL(url, host) { return 'DIRECT'; }\n"
+
+        ad_dict_entries = ", ".join([f'"{d}":1' for d in all_blocked])
+        pac_code = f"""// SwitchGate PAC Hard Circuit Breaker
+var BLOCKED_DOMAINS = {{{ad_dict_entries}}};
+
+function FindProxyForURL(url, host) {{
+    if (!host || host === "localhost" || host === "127.0.0.1" || host === "::1") return "DIRECT";
+    host = host.toLowerCase();
+
+    if (BLOCKED_DOMAINS[host]) {{
+        return "PROXY 127.0.0.1:18888";
+    }}
+
+    for (var d in BLOCKED_DOMAINS) {{
+        if (host === d || (host.length > d.length && host.indexOf("." + d) === (host.length - d.length - 1))) {{
+            return "PROXY 127.0.0.1:18888";
+        }}
+    }}
+
+    return "DIRECT";
+}}
+"""
+        return pac_code
 
     def _apply_windows_pac(self):
         if not IS_WINDOWS:
@@ -278,49 +336,8 @@ function FindProxyForURL(url, host) {{
             winreg.CloseKey(key)
             _wininet.InternetSetOptionW(0, 39, None, 0)
             _wininet.InternetSetOptionW(0, 37, None, 0)
-        except FileNotFoundError:
+        except Exception:
             pass
-        except Exception as e:
-            print(f"[PAC Notice] Error clearing Windows PAC: {e}")
 
-    def _sync_kperf_domains(self):
-        while not self._stop_event.is_set():
-            try:
-                now = time.strftime("%H:%M:%S")
-
-                with kperf_engine._state_lock:
-                    kperf_hits = dict(kperf_engine.live_domain_hits)
-
-                with self._lock:
-                    for d_key, d_info in kperf_hits.items():
-                        if d_key in self.live_websites:
-                            self.live_websites[d_key]["hits"] += d_info["hits"]
-                            self.live_websites[d_key]["last_seen"] = d_info["last_seen"]
-                        else:
-                            is_blocked = db.is_domain_blocked(d_key)
-                            self.live_websites[d_key] = {
-                                "domain": d_key,
-                                "friendly_name": d_key.split(".")[0].title(),
-                                "category": d_info.get("category", "Web Service"),
-                                "company": "Online Service",
-                                "hits": d_info.get("hits", 1),
-                                "last_seen": d_info.get("last_seen", now),
-                                "is_blocked": is_blocked
-                            }
-
-                    # Memory bounding: Keep top 500 websites
-                    if len(self.live_websites) > 500:
-                        sorted_items = sorted(
-                            self.live_websites.items(),
-                            key=lambda item: (item[1].get("is_blocked", False), item[1].get("hits", 0)),
-                            reverse=True
-                        )
-                        self.live_websites = dict(sorted_items[:500])
-
-            except Exception:
-                pass
-
-            if self._stop_event.wait(timeout=1.0):
-                break
 
 url_controller = WebsiteUrlController()

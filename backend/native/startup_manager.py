@@ -24,18 +24,14 @@ class WindowsStartupManager:
         if not IS_WINDOWS:
             return False
         try:
-            # Resolve executable / pythonw path
-            python_exe = sys.executable
-            # If python.exe, prefer pythonw.exe for windowless background startup
-            pythonw = Path(python_exe).parent / "pythonw.exe"
-            if pythonw.exists():
-                runner = str(pythonw)
+            if getattr(sys, 'frozen', False):
+                cmd = f'"{sys.executable}" --startup --delay {delayed_seconds}'
             else:
-                runner = str(python_exe)
-
-            run_py = Path(__file__).resolve().parent.parent.parent / "run.py"
-            # Launch command with delayed safe boot flag
-            cmd = f'"{runner}" "{run_py}" --startup --delay {delayed_seconds}'
+                python_exe = sys.executable
+                pythonw = Path(python_exe).parent / "pythonw.exe"
+                runner = str(pythonw) if pythonw.exists() else str(python_exe)
+                run_py = Path(__file__).resolve().parent.parent.parent / "run.py"
+                cmd = f'"{runner}" "{run_py}" --startup --delay {delayed_seconds}'
 
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE)
             winreg.SetValueEx(key, cls.APP_NAME, 0, winreg.REG_SZ, cmd)

@@ -139,8 +139,10 @@ def elevate_if_needed():
         if "--no-elevate" not in sys.argv:
             try:
                 import ctypes
-                params = " ".join([f'"{arg}"' for arg in sys.argv] + ["--no-elevate"])
-                ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
+                script_path = str(Path(sys.argv[0]).resolve())
+                remaining_args = [f'"{arg}"' for arg in sys.argv[1:] if arg != "--no-elevate"]
+                params = f'"{script_path}" ' + " ".join(remaining_args + ["--no-elevate"])
+                ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params.strip(), str(BASE_DIR), 1)
                 if ret > 32:
                     sys.exit(0)
             except Exception as e:
@@ -269,9 +271,9 @@ def main():
     window = webview.create_window(
         title="SwitchGate - Network Gateway & Remote Control v2.0",
         url=app_url,
-        width=1280,
-        height=840,
-        min_size=(1020, 680),
+        width=1320,
+        height=780,
+        min_size=(960, 560),
         background_color="#080b13",
         text_select=False,
         confirm_close=False

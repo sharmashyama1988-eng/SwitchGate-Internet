@@ -1,9 +1,9 @@
 @echo off
-title Build SwitchGate Executable
+title SwitchGate Turbo Build & Packager (20s)
 cd /d "%~dp0"
 echo ===================================================
-echo   Compiling SwitchGate to Windows Standalone (.EXE)
+echo   SwitchGate Turbo Packager (SSD Accelerated)
 echo ===================================================
 echo.
-python build_exe.py
+python fast_package.py
 pause

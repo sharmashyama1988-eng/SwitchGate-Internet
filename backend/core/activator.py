@@ -47,11 +47,12 @@ class SystemActivator:
                 ("DNS Sinkhole",     lambda: __import__("backend.core.dns_sinkhole",      fromlist=["dns_sinkhole"]).dns_sinkhole.start()),
                 ("Traffic Monitor",  lambda: __import__("backend.core.traffic_monitor",   fromlist=["traffic_monitor"]).traffic_monitor.start()),
                 ("Smart Scheduler",  lambda: __import__("backend.core.scheduler",         fromlist=["scheduler"]).scheduler.start()),
-                ("Ghost Detector",   lambda: __import__("backend.core.ghost_detector",    fromlist=["ghost_detector"]).ghost_detector.start()),
                 ("App Controller",   lambda: __import__("backend.core.app_controller",    fromlist=["app_controller"]).app_controller.start()),
                 ("URL Controller",   lambda: __import__("backend.core.url_controller",    fromlist=["url_controller"]).url_controller.start()),
                 ("Adapter Watchdog", lambda: __import__("backend.core.adapter_watchdog",  fromlist=["adapter_watchdog"]).adapter_watchdog.start()),
                 ("Next-Gen Firewall",lambda: __import__("firewall.firewall_controller",   fromlist=["firewall_controller"]).firewall_controller.start()),
+                ("QoS Turbo Engine", lambda: __import__("backend.core.qos_engine",        fromlist=["qos_engine"]).qos_engine.start()),
+                ("AI Netpilot Engine",lambda: __import__("backend.core.ai_netpilot",      fromlist=["ai_netpilot"]).ai_netpilot.start()),
             ]
 
             # Spawn one thread per engine — all start simultaneously
@@ -82,12 +83,12 @@ class SystemActivator:
                 ("DNS Sinkhole",      lambda: __import__("backend.core.dns_sinkhole",     fromlist=["dns_sinkhole"]).dns_sinkhole.stop()),
                 ("Traffic Monitor",   lambda: __import__("backend.core.traffic_monitor",  fromlist=["traffic_monitor"]).traffic_monitor.stop()),
                 ("Smart Scheduler",   lambda: __import__("backend.core.scheduler",        fromlist=["scheduler"]).scheduler.stop()),
-                ("Ghost Detector",    lambda: __import__("backend.core.ghost_detector",   fromlist=["ghost_detector"]).ghost_detector.stop()),
                 ("App Controller",    lambda: __import__("backend.core.app_controller",   fromlist=["app_controller"]).app_controller.stop()),
                 ("URL Controller",    lambda: __import__("backend.core.url_controller",   fromlist=["url_controller"]).url_controller.stop()),
                 ("Adapter Watchdog",  lambda: __import__("backend.core.adapter_watchdog", fromlist=["adapter_watchdog"]).adapter_watchdog.stop()),
                 ("kPerf Engine",      lambda: __import__("backend.kperf.kperf_engine",    fromlist=["kperf_engine"]).kperf_engine.stop()),
                 ("Blackhole Proxy",   lambda: __import__("backend.core.blackhole_proxy",  fromlist=["blackhole_server"]).blackhole_server.stop()),
+                ("AI Netpilot Engine",lambda: __import__("backend.core.ai_netpilot",      fromlist=["ai_netpilot"]).ai_netpilot.stop()),
             ]
 
             stop_threads = []

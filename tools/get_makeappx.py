@@ -25,17 +25,18 @@ def ensure_makeappx() -> Path:
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = resp.read()
 
-    print(f"[*] Downloaded {len(data) / (1024*1024):.2f} MB. Extracting x64 packaging binaries...")
+    print(f"[*] Downloaded {len(data) / (1024*1024):.2f} MB. Extracting x64 packaging binaries & manifests...")
+    prefix = "bin/10.0.22621.0/x64/"
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         for member in zf.namelist():
-            # Extract x64 makeappx, makepri, AppxPackaging and dependencies
-            if "bin/10.0.22621.0/x64/" in member or "bin/x64/" in member:
-                filename = Path(member).name
-                if filename in ["makeappx.exe", "makepri.exe", "signtool.exe", "AppxPackaging.dll", "makeappx.exe.manifest"]:
-                    target = TOOLS_DIR / filename
-                    with zf.open(member) as src, open(target, "wb") as dst:
-                        dst.write(src.read())
-                    print(f"   + Extracted: {filename}")
+            if member.startswith(prefix) and not member.endswith("/"):
+                rel_path = member[len(prefix):]
+                target = TOOLS_DIR / rel_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(target, "wb") as dst:
+                    dst.write(src.read())
+                if target.name in ["makeappx.exe", "makepri.exe", "signtool.exe", "appxpackaging.dll"]:
+                    print(f"   + Extracted: {rel_path}")
 
     print(f"[✅] Official Microsoft MakeAppx ready at: {makeappx_exe}")
     return makeappx_exe

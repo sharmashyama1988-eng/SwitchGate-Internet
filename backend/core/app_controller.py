@@ -1,13 +1,13 @@
 """
-SwitchGate - Real-Time App Network Controller (Zero-Crash & Persistent Enterprise Blocker)
-Monitors real running Windows apps with network sockets, tracks live data usage (KB/s),
-and enforces 100% PERSISTENT rules (Rules stay active in Windows Kernel even when SwitchGate is closed,
-until explicitly toggled back ON by the user).
+SwitchGate - Real-Time App Network Controller v2.5
+Monitors real running Windows applications, provides 1-Click Internet Cutoff / Restore,
+and enforces persistent Windows Defender Firewall rules + Socket Termination.
 """
 import os
 import sys
 import json
 import time
+import glob
 import psutil
 import platform
 import subprocess
@@ -17,29 +17,27 @@ from typing import Dict, List, Any, Optional, Set
 from backend.config import DATA_DIR
 from backend.database import db
 from backend.kperf.kperf_engine import kperf_engine
+from backend.core.silent_process import silent_run
 
 IS_WINDOWS = platform.system() == "Windows"
-if IS_WINDOWS:
-    import winreg
-    import ctypes
-    _wininet = ctypes.windll.wininet
-    _REG_INTERNET_SETTINGS = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-
 PERSISTENT_RULES_FILE = DATA_DIR / "persistent_apps.json"
+
 
 def is_admin() -> bool:
     try:
         if IS_WINDOWS:
+            import ctypes
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         return os.geteuid() == 0
     except Exception:
         return False
 
+
 class AppNetworkController:
     def __init__(self):
-        self.blocked_apps: Dict[str, str] = {} # app_name -> exe_path
-        self.app_prev_io: Dict[int, Dict[str, Any]] = {} # pid -> {bytes, time}
-        self.app_live_speeds: Dict[str, float] = {} # app_name -> current KB/s
+        self.blocked_apps: Dict[str, str] = {}  # app_key -> exe_path
+        self.app_prev_io: Dict[int, Dict[str, Any]] = {}  # pid -> {bytes, time}
+        self.app_live_speeds: Dict[str, float] = {}  # app_key -> current KB/s
         self._lock = threading.Lock()
         self.is_running = False
         self._stop_event = threading.Event()
@@ -55,10 +53,8 @@ class AppNetworkController:
                 saved = json.load(f)
             if isinstance(saved, dict):
                 self.blocked_apps = saved
-                # Re-apply firewall rules for all saved blocked apps
                 for app_key, exe_path in self.blocked_apps.items():
-                    if exe_path:
-                        self._apply_firewall_rules(app_key, exe_path)
+                    self._apply_firewall_rules(app_key, exe_path)
                 print(f"[App Controller] Loaded {len(self.blocked_apps)} persistent blocked apps.")
         except Exception as e:
             print(f"[App Controller] Error loading persistent rules: {e}")
@@ -78,15 +74,13 @@ class AppNetworkController:
                 return
             self.is_running = True
             self._stop_event.clear()
-            self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name="SwitchGate-AppController")
-            self._monitor_thread.start()
-            print("[App Controller] Persistent Universal Desktop App Controller active.")
+        self._monitor_thread = threading.Thread(
+            target=self._speed_monitor_loop, daemon=True, name="SwitchGate-AppSpeed"
+        )
+        self._monitor_thread.start()
+        print("[App Controller] ✅ Windows Application Network Controller active.")
 
     def stop(self):
-        """
-        On stop/exit, DO NOT delete firewall rules or reset blocked state!
-        Rules remain 100% active and persistent in Windows Kernel even after closing.
-        """
         self._stop_event.set()
         self.is_running = False
         if self._monitor_thread and self._monitor_thread.is_alive():
@@ -94,41 +88,99 @@ class AppNetworkController:
                 self._monitor_thread.join(timeout=1.0)
             except Exception:
                 pass
-        self._save_persistent_rules()
-        print("[App Controller] Persistent rules safely preserved in Windows Kernel.")
+
+    def _speed_monitor_loop(self):
+        """Measures per-process bandwidth (KB/s) in real-time."""
+        while not self._stop_event.is_set():
+            try:
+                now = time.time()
+                current_speeds: Dict[str, float] = {}
+
+                for p in psutil.process_iter(['name', 'pid']):
+                    try:
+                        name = p.info['name']
+                        pid = p.info['pid']
+                        if not name:
+                            continue
+
+                        app_key = name.lower()
+                        with self._lock:
+                            if app_key in self.blocked_apps:
+                                current_speeds[app_key] = 0.0
+                                continue
+
+                        io = p.io_counters()
+                        total_bytes = io.read_bytes + io.write_bytes
+
+                        if pid in self.app_prev_io:
+                            prev_bytes = self.app_prev_io[pid]["bytes"]
+                            prev_time = self.app_prev_io[pid]["time"]
+                            dt = now - prev_time
+                            if dt > 0.1:
+                                kbps = max(0.0, ((total_bytes - prev_bytes) / 1024.0) / dt)
+                                current_speeds[app_key] = current_speeds.get(app_key, 0.0) + round(kbps, 1)
+
+                        self.app_prev_io[pid] = {"bytes": total_bytes, "time": now}
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                    except Exception:
+                        continue
+
+                # Evict dead PIDs
+                active_pids = set(psutil.pids())
+                self.app_prev_io = {pid: v for pid, v in self.app_prev_io.items() if pid in active_pids}
+
+                with self._lock:
+                    self.app_live_speeds = current_speeds
+
+            except Exception:
+                pass
+            time.sleep(1.0)
+
+    def _categorize_app(self, name: str) -> tuple[str, str]:
+        lower = name.lower()
+        if any(x in lower for x in ("chrome", "edge", "msedge", "firefox", "brave", "opera")):
+            return "Web Browser", name.split(".")[0].title()
+        if any(x in lower for x in ("spotify", "discord", "telegram", "slack", "teams", "zoom", "whatsapp")):
+            return "Communication / Media", name.split(".")[0].title()
+        if any(x in lower for x in ("steam", "epic", "battle.net", "riot", "valorant", "csgo", "roblox")):
+            return "Gaming Client", name.split(".")[0].title()
+        if any(x in lower for x in ("utorrent", "bittorrent", "qbittorrent", "transmission")):
+            return "P2P / Torrent", name.split(".")[0].title()
+        if any(x in lower for x in ("svchost", "system", "lsass", "spoolsv", "services")):
+            return "Windows Core OS", name
+        return "Desktop App", name.split(".")[0].title()
 
     def get_real_active_apps(self) -> List[Dict[str, Any]]:
-        """Scans all running processes with open TCP/UDP network connections."""
         active_map: Dict[str, Dict[str, Any]] = {}
-
         try:
-            for conn in psutil.net_connections(kind="inet"):
+            for conn in psutil.net_connections(kind='inet'):
                 if not conn.pid:
                     continue
                 try:
                     p = psutil.Process(conn.pid)
                     name = p.name()
-                    app_key = name.lower()
-                    
-                    if app_key not in active_map:
-                        exe_path = ""
-                        try:
-                            exe_path = p.exe()
-                        except (psutil.AccessDenied, psutil.NoSuchProcess):
-                            pass
+                    if not name:
+                        continue
 
+                    app_key = name.lower().strip()
+                    exe_path = ""
+                    try:
+                        exe_path = p.exe()
+                    except Exception:
+                        pass
+
+                    if app_key not in active_map:
                         category, friendly_name = self._categorize_app(name)
-                        
-                        io = None
+                        read_bytes, write_bytes = 0, 0
                         try:
                             io = p.io_counters()
+                            read_bytes = io.read_bytes
+                            write_bytes = io.write_bytes
                         except Exception:
                             pass
 
-                        read_bytes = io.read_bytes if io else 0
-                        write_bytes = io.write_bytes if io else 0
                         total_mb = round((read_bytes + write_bytes) / (1024 * 1024), 2)
-
                         with self._lock:
                             is_blocked = app_key in self.blocked_apps
 
@@ -155,7 +207,7 @@ class AppNetworkController:
                     continue
 
         except Exception as e:
-            print(f"[App Controller Scan Error] {e}")
+            print(f"[App Controller Scan Notice] {e}")
 
         # Ensure all persistent blocked apps remain visible
         with self._lock:
@@ -180,6 +232,7 @@ class AppNetworkController:
         return result
 
     def _resolve_all_exe_paths(self, app_key: str, exe_path: str = "") -> List[str]:
+        """Exhaustively resolves all filesystem binary paths matching an app name."""
         paths = set()
         if exe_path and os.path.exists(exe_path):
             paths.add(exe_path)
@@ -192,37 +245,39 @@ class AppNetworkController:
             except Exception:
                 pass
 
-        import glob
+        base_name = app_key.replace(".exe", "")
         candidates = [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Mozilla Firefox\firefox.exe",
-            r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
-            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-            os.path.expandvars(r"%APPDATA%\Spotify\Spotify.exe"),
-            os.path.expandvars(r"%LOCALAPPDATA%\Discord\app-*\Discord.exe"),
-            os.path.expandvars(r"%APPDATA%\Telegram Desktop\Telegram.exe"),
-            r"C:\Program Files\uTorrent\uTorrent.exe",
-            r"C:\Program Files (x86)\uTorrent\uTorrent.exe",
-            os.path.expandvars(r"%APPDATA%\uTorrent\uTorrent.exe"),
-            r"C:\Program Files\Zoom\bin\Zoom.exe",
-            os.path.expandvars(r"%APPDATA%\Zoom\bin\Zoom.exe"),
+            rf"C:\Program Files\Google\Chrome\Application\{app_key}",
+            rf"C:\Program Files (x86)\Google\Chrome\Application\{app_key}",
+            os.path.expandvars(rf"%LOCALAPPDATA%\Google\Chrome\Application\{app_key}"),
+            rf"C:\Program Files\Microsoft\Edge\Application\{app_key}",
+            rf"C:\Program Files (x86)\Microsoft\Edge\Application\{app_key}",
+            rf"C:\Program Files\Mozilla Firefox\{app_key}",
+            rf"C:\Program Files (x86)\Mozilla Firefox\{app_key}",
+            rf"C:\Program Files\BraveSoftware\Brave-Browser\Application\{app_key}",
+            os.path.expandvars(rf"%APPDATA%\Spotify\{app_key}"),
+            os.path.expandvars(rf"%LOCALAPPDATA%\Discord\app-*\{app_key}"),
+            os.path.expandvars(rf"%APPDATA%\Telegram Desktop\{app_key}"),
+            rf"C:\Program Files\uTorrent\{app_key}",
+            rf"C:\Program Files (x86)\uTorrent\{app_key}",
+            os.path.expandvars(rf"%APPDATA%\uTorrent\{app_key}"),
+            rf"C:\Program Files\Zoom\bin\{app_key}",
+            os.path.expandvars(rf"%APPDATA%\Zoom\bin\{app_key}"),
+            rf"C:\Windows\System32\{app_key}",
+            rf"C:\Windows\{app_key}",
         ]
         for cand in candidates:
-            if cand.lower().endswith(app_key.lower()):
+            try:
                 for matched in glob.glob(cand):
                     if os.path.exists(matched):
                         paths.add(matched)
+            except Exception:
+                pass
 
         return list(paths)
 
     def toggle_app_internet(self, app_name: str, exe_path: str, action: str) -> bool:
-        """
-        Switches internet ON or OFF for ANY desktop app (Persists across reboots and app closes).
-        """
+        """Switches internet ON or OFF for ANY desktop application."""
         app_key = app_name.lower().strip()
         action_upper = action.upper()
 
@@ -246,13 +301,13 @@ class AppNetworkController:
             if matching_pids:
                 kperf_engine.kill_sockets_by_pids(matching_pids)
 
-            # 2. Add Windows Firewall Inbound & Outbound Block Rules for the Executable
+            # 2. Add Windows Firewall Inbound & Outbound Block Rules for all matched paths
             self._apply_firewall_rules(app_key, exe_path)
 
-            db.add_log("APP_BLOCK", "", "", f"Permanently Blocked Internet for {app_name} ({exe_path or 'Process'})")
+            db.add_log("APP_BLOCK", "", "", f"Permanently Blocked Internet for {app_name}")
             return True
 
-        else: # action == "ON"
+        else:  # action == "ON"
             with self._lock:
                 if app_key in self.blocked_apps:
                     del self.blocked_apps[app_key]
@@ -261,7 +316,7 @@ class AppNetworkController:
             # 1. Remove Windows Firewall Rules
             self._remove_firewall_rules(app_key, exe_path)
 
-            # 2. Flush DNS & Sockets
+            # 2. Flush DNS
             try:
                 from backend.native.network_engine import native_engine
                 native_engine.flush_dns()
@@ -272,197 +327,58 @@ class AppNetworkController:
             return True
 
     def _apply_firewall_rules(self, app_key: str, exe_path: str):
-        """
-        Blocks internet for an app via Windows Firewall.
-        Handles three scenarios:
-          1. exe_path known + resolvable → block by exact executable path (most precise)
-          2. exe_path known but file missing → still add rule for the path (rule created, app won't launch)
-          3. No paths at all → block by process name pattern using PowerShell Get-Process loop
-        """
         if not IS_WINDOWS:
             return
 
-        rule_out = f"SwitchGate_App_{app_key.replace('.', '_').replace(' ', '_')}_Out"
-        rule_in  = f"SwitchGate_App_{app_key.replace('.', '_').replace(' ', '_')}_In"
+        clean_key = app_key.replace(".", "_").replace(" ", "_").replace("-", "_")
+        rule_out = f"SwitchGate_App_{clean_key}_Out"
+        rule_in  = f"SwitchGate_App_{clean_key}_In"
 
         all_paths = self._resolve_all_exe_paths(app_key, exe_path)
 
-        # ── Scenario 1 & 2: We have at least one path ─────────────────────────
         if all_paths:
             for path in all_paths:
-                if is_admin():
-                    subprocess.run(
-                        ["netsh", "advfirewall", "firewall", "add", "rule",
-                         f"name={rule_out}", "dir=out", "action=block",
-                         f"program={path}", "enable=yes", "profile=any", "protocol=any"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                    )
-                    subprocess.run(
-                        ["netsh", "advfirewall", "firewall", "add", "rule",
-                         f"name={rule_in}", "dir=in", "action=block",
-                         f"program={path}", "enable=yes", "profile=any", "protocol=any"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                    )
-                else:
-                    cmd = (
-                        f"netsh advfirewall firewall add rule name='{rule_out}' "
-                        f"dir=out action=block program='{path}' enable=yes profile=any protocol=any; "
-                        f"netsh advfirewall firewall add rule name='{rule_in}' "
-                        f"dir=in action=block program='{path}' enable=yes profile=any protocol=any"
-                    )
-                    subprocess.run(
-                        ["powershell", "-WindowStyle", "Hidden", "-Command",
-                         f"Start-Process powershell -ArgumentList '-Command \"{cmd}\"' "
-                         f"-Verb RunAs -WindowStyle Hidden"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                    )
-            return
-
-        # ── Scenario 3: No paths — fallback to PowerShell process-name block ──
-        # Finds all running exe paths matching the app name and creates rules for each
-        print(f"[App Controller] No exe paths resolved for '{app_key}' — using PowerShell name-based block.")
-        ps_block = (
-            f"$procs = Get-Process | Where-Object {{$_.Name -like '*{app_key.replace('.exe','')}*'}} | "
-            f"Select-Object -ExpandProperty Path -ErrorAction SilentlyContinue | Where-Object {{$_}}; "
-            f"foreach ($p in $procs) {{ "
-            f"  netsh advfirewall firewall add rule name='{rule_out}' dir=out action=block program=$p enable=yes profile=any protocol=any; "
-            f"  netsh advfirewall firewall add rule name='{rule_in}' dir=in action=block program=$p enable=yes profile=any protocol=any "
-            f"}}"
-        )
-        if is_admin():
-            subprocess.run(
-                ["powershell", "-WindowStyle", "Hidden", "-Command", ps_block],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+                # Add Outbound Block
+                silent_run(
+                    ["netsh", "advfirewall", "firewall", "add", "rule",
+                     f"name={rule_out}", "dir=out", "action=block",
+                     f"program={path}", "enable=yes", "profile=any", "protocol=any"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                # Add Inbound Block
+                silent_run(
+                    ["netsh", "advfirewall", "firewall", "add", "rule",
+                     f"name={rule_in}", "dir=in", "action=block",
+                     f"program={path}", "enable=yes", "profile=any", "protocol=any"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            print(f"[App Controller] ✅ Windows Firewall added rules for '{app_key}' across {len(all_paths)} paths.")
         else:
-            subprocess.run(
-                ["powershell", "-WindowStyle", "Hidden", "-Command",
-                 f"Start-Process powershell -ArgumentList '-Command \"{ps_block}\"' "
-                 f"-Verb RunAs -WindowStyle Hidden"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            # Fallback: Process name PowerShell rule
+            ps_block = (
+                f"$procs = Get-Process | Where-Object {{$_.Name -like '*{app_key.replace('.exe','')}*'}} | "
+                f"Select-Object -ExpandProperty Path -ErrorAction SilentlyContinue | Where-Object {{$_}}; "
+                f"foreach ($p in $procs) {{ "
+                f"  netsh advfirewall firewall add rule name='{rule_out}' dir=out action=block program=$p enable=yes profile=any protocol=any; "
+                f"  netsh advfirewall firewall add rule name='{rule_in}' dir=in action=block program=$p enable=yes profile=any protocol=any "
+                f"}}"
             )
+            silent_run(["powershell", "-WindowStyle", "Hidden", "-Command", ps_block],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"[App Controller] ✅ Process name block rules applied for '{app_key}'.")
 
-    def _remove_firewall_rules(self, app_key: str, exe_path: str = ""):
+    def _remove_firewall_rules(self, app_key: str, exe_path: str):
         if not IS_WINDOWS:
             return
-        rule_out = f"SwitchGate_App_{app_key.replace('.', '_')}_Out"
-        rule_in = f"SwitchGate_App_{app_key.replace('.', '_')}_In"
+        clean_key = app_key.replace(".", "_").replace(" ", "_").replace("-", "_")
+        rule_out = f"SwitchGate_App_{clean_key}_Out"
+        rule_in  = f"SwitchGate_App_{clean_key}_In"
 
-        if is_admin():
-            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_out}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_in}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            all_paths = self._resolve_all_exe_paths(app_key, exe_path)
-            for path in all_paths:
-                subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"program={path}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            cmd = f"netsh advfirewall firewall delete rule name='{rule_out}'; netsh advfirewall firewall delete rule name='{rule_in}'"
-            all_paths = self._resolve_all_exe_paths(app_key, exe_path)
-            for path in all_paths:
-                cmd += f"; netsh advfirewall firewall delete rule program='{path}'"
-            subprocess.run(["powershell", "-Command", f"Start-Process powershell -ArgumentList '-Command \"{cmd}\"' -Verb RunAs -WindowStyle Hidden"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        silent_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_out}"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        silent_run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_in}"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"[App Controller] ✅ Removed Windows Firewall rules for '{app_key}'.")
 
-    def _enable_system_blackhole_proxy(self):
-        if not IS_WINDOWS:
-            return
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_INTERNET_SETTINGS, 0, winreg.KEY_SET_VALUE)
-            winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
-            winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, "127.0.0.1:9999")
-            winreg.SetValueEx(key, "ProxyOverride", 0, winreg.REG_SZ, "<local>;localhost;127.0.0.1;10.100.141.*")
-            winreg.CloseKey(key)
-
-            _wininet.InternetSetOptionW(0, 39, None, 0)
-            _wininet.InternetSetOptionW(0, 37, None, 0)
-        except Exception as e:
-            print(f"[Proxy Error] {e}")
-
-    def _disable_system_blackhole_proxy(self):
-        if not IS_WINDOWS:
-            return
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_INTERNET_SETTINGS, 0, winreg.KEY_SET_VALUE)
-            winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 0)
-            winreg.CloseKey(key)
-
-            _wininet.InternetSetOptionW(0, 39, None, 0)
-            _wininet.InternetSetOptionW(0, 37, None, 0)
-        except Exception as e:
-            print(f"[Proxy Error] {e}")
-
-    def _monitor_loop(self):
-        """Calculates real per-app delta speeds every second."""
-        while not self._stop_event.is_set():
-            try:
-                now = time.time()
-                new_speeds = {}
-                seen_pids = set()
-
-                for p in psutil.process_iter(['pid', 'name']):
-                    try:
-                        pid = p.info['pid']
-                        name = p.info['name']
-                        if not name:
-                            continue
-                        seen_pids.add(pid)
-                        app_key = name.lower()
-
-                        with self._lock:
-                            if app_key in self.blocked_apps:
-                                new_speeds[app_key] = 0.0
-                                continue
-
-                        io = p.io_counters() if hasattr(p, 'io_counters') else None
-                        if not io:
-                            continue
-
-                        total_bytes = io.read_bytes + io.write_bytes
-                        if pid in self.app_prev_io:
-                            prev_bytes = self.app_prev_io[pid]["bytes"]
-                            prev_time = self.app_prev_io[pid]["time"]
-                            dt = now - prev_time
-                            if dt > 0:
-                                kbps = round(((total_bytes - prev_bytes) / dt) / 1024, 1)
-                                if kbps > 0:
-                                    new_speeds[app_key] = new_speeds.get(app_key, 0.0) + kbps
-
-                        self.app_prev_io[pid] = {"bytes": total_bytes, "time": now}
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-
-                # Prune dead PIDs to guarantee zero memory leaks
-                dead_pids = [pid for pid in self.app_prev_io if pid not in seen_pids]
-                for pid in dead_pids:
-                    del self.app_prev_io[pid]
-
-                with self._lock:
-                    self.app_live_speeds = new_speeds
-
-            except Exception:
-                pass
-
-            if self._stop_event.wait(timeout=1.0):
-                break
-
-    def _categorize_app(self, name: str) -> tuple[str, str]:
-        nl = name.lower()
-        if "chrome" in nl: return "browser", "Google Chrome"
-        if "msedge" in nl or "edge" in nl: return "browser", "Microsoft Edge"
-        if "firefox" in nl: return "browser", "Mozilla Firefox"
-        if "brave" in nl: return "browser", "Brave Browser"
-        if "discord" in nl: return "social", "Discord"
-        if "steam" in nl: return "gaming", "Steam Client"
-        if "spotify" in nl: return "media", "Spotify Music"
-        if "telegram" in nl: return "social", "Telegram Desktop"
-        if "whatsapp" in nl: return "social", "WhatsApp Desktop"
-        if "antigravity" in nl: return "devtools", "Antigravity AI Agent"
-        if "code" in nl or "visualstudio" in nl: return "devtools", "VS Code Studio"
-        if "python" in nl: return "devtools", "Python Network Worker"
-        if "tally" in nl: return "tools", "Tally Gateway Service"
-        if "node" in nl: return "devtools", "Node.js Server"
-        if "svchost" in nl: return "system", "Windows Host Process"
-        if "system" in nl or "lsass" in nl or "services" in nl: return "system", "Windows Kernel System"
-        
-        clean_name = name.replace(".exe", "").replace("-", " ").replace("_", " ").title()
-        return "tools", clean_name
 
 app_controller = AppNetworkController()
