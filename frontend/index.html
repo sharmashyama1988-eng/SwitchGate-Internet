@@ -116,6 +116,12 @@
           </span>
         </div>
 
+        <!-- User Account / Firebase Auth Status Badge -->
+        <button id="btnHeaderUserAuth" onclick="openAuthModal()" aria-label="User Account Login" class="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition active:scale-95">
+          <span id="headerUserAvatar" class="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center text-[10px] font-mono">👤</span>
+          <span id="headerUserName">Guest Admin</span>
+        </button>
+
         <!-- Settings Gear Icon Button -->
         <button onclick="switchView('settings')" aria-label="Open Advanced Settings" class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white transition">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -1184,6 +1190,59 @@
           </div>
         </div>
 
+        <!-- Section 7: User Account & Cloud Identity (Firebase Auth) -->
+        <div class="command-card p-5 border border-white/10 space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-white/5">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-sm">
+                🔥
+              </div>
+              <div>
+                <h4 class="text-sm font-bold text-white">7. User Account & Cloud Identity (Firebase Auth)</h4>
+                <p class="text-[11px] text-slate-400">Sign in with Google or Apple ID for multi-device sync, authorized user management & cloud snapshots.</p>
+              </div>
+            </div>
+            <span class="text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-500/30">OAUTH2 READY</span>
+          </div>
+
+          <!-- Logged Out State Prompt -->
+          <div id="settingsAuthLoginPrompt" class="p-4 bg-black/40 rounded-xl border border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <div class="font-bold text-white text-xs">Sign in to SwitchGate Cloud</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Currently operating in local Guest Administrator mode.</div>
+            </div>
+            <div class="flex items-center gap-2.5">
+              <button onclick="handleGoogleLogin()" class="px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-black text-xs font-bold transition flex items-center gap-2 shadow-sm active:scale-95">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+                <span>Google</span>
+              </button>
+              <button onclick="handleAppleLogin()" class="px-3.5 py-1.5 rounded-xl bg-black hover:bg-slate-900 border border-white/20 text-white text-xs font-bold transition flex items-center gap-2 shadow-sm active:scale-95">
+                <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 170 170"><path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.59-7.71-11.66-14.01-6.74-10.42-12.1-22.37-16.07-35.84-3.97-13.47-5.96-26.11-5.96-37.91 0-14.99 3.59-27.42 10.77-37.3 7.18-9.87 16.58-14.86 28.2-14.98 5.43 0 11.25 1.41 17.45 4.23 6.2 2.82 10.43 4.23 12.69 4.23 1.96 0 6.31-1.46 13.05-4.39 6.74-2.93 12.44-4.29 17.1-4.08 12.83.65 23.14 5.38 30.93 14.18-11.31 6.84-16.85 16.3-16.63 28.38.22 9.56 3.86 17.65 10.92 24.28 7.07 6.63 15.65 10.37 25.75 11.24-2.61 7.6-5.65 15.05-9.13 22.35zM119.22 31.84c0-7.39 2.66-14.38 7.99-20.97 5.32-6.59 11.85-10.64 19.57-12.15.54 2.17.81 4.23.81 6.19 0 7.39-2.82 14.65-8.48 21.78-5.65 7.12-12.38 11.23-20.19 12.31-.22-2.39-.33-4.78-.33-7.16z"/></svg>
+                <span>Apple</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Logged In Profile Card -->
+          <div id="settingsAuthUserCard" class="hidden p-4 bg-emerald-950/20 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-bold flex items-center justify-center text-sm font-mono">
+                ✓
+              </div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-bold text-white text-sm" id="settingsUserProfileName">Authorized Admin</span>
+                  <span class="text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30" id="settingsUserProfileProvider">GOOGLE</span>
+                </div>
+                <div class="text-[11px] text-slate-400 font-mono mt-0.5" id="settingsUserProfileEmail">admin@switchgate.lan</div>
+              </div>
+            </div>
+            <button onclick="handleSignOut()" class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-white/10 hover:border-rose-500/30 text-xs font-bold transition">
+              Sign Out
+            </button>
+          </div>
+        </div>
+
         <!-- Hardware Network Diagnostic Footer -->
         <div class="bg-black/30 rounded-2xl p-4 border border-white/5 text-xs font-mono text-slate-400 flex flex-wrap items-center justify-between gap-3">
           <div><span class="text-slate-500">Interface:</span> <span id="settingsIface" class="text-cyan-400 font-bold">Wi-Fi 2</span></div>
@@ -1336,11 +1395,48 @@
     </div>
   </div>
 
+  <!-- Modal 4: User Authentication (Firebase Google & Apple) -->
+  <div id="modalAuth" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modalAuthTitle">
+    <div class="modal-content p-6 space-y-4 max-w-sm">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">🔥</span>
+          <h3 id="modalAuthTitle" class="text-base font-bold text-white">Sign In to SwitchGate</h3>
+        </div>
+        <button onclick="closeModal('modalAuth')" aria-label="Close modal" class="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold">✕</button>
+      </div>
+
+      <p class="text-xs text-slate-400 leading-relaxed">
+        Authenticate using your Google Account or Apple ID for synchronized network profiles, cloud security backups, and multi-user administration.
+      </p>
+
+      <div class="space-y-2.5 pt-2">
+        <button onclick="handleGoogleLogin()" class="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-black font-bold text-xs flex items-center justify-center gap-2.5 shadow-md transition active:scale-95">
+          <svg class="w-4 h-4" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+          <span>Continue with Google</span>
+        </button>
+
+        <button onclick="handleAppleLogin()" class="w-full py-2.5 px-4 rounded-xl bg-black hover:bg-slate-900 border border-white/20 text-white font-bold text-xs flex items-center justify-center gap-2.5 shadow-md transition active:scale-95">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 170 170"><path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.04-7.59-7.71-11.66-14.01-6.74-10.42-12.1-22.37-16.07-35.84-3.97-13.47-5.96-26.11-5.96-37.91 0-14.99 3.59-27.42 10.77-37.3 7.18-9.87 16.58-14.86 28.2-14.98 5.43 0 11.25 1.41 17.45 4.23 6.2 2.82 10.43 4.23 12.69 4.23 1.96 0 6.31-1.46 13.05-4.39 6.74-2.93 12.44-4.29 17.1-4.08 12.83.65 23.14 5.38 30.93 14.18-11.31 6.84-16.85 16.3-16.63 28.38.22 9.56 3.86 17.65 10.92 24.28 7.07 6.63 15.65 10.37 25.75 11.24-2.61 7.6-5.65 15.05-9.13 22.35zM119.22 31.84c0-7.39 2.66-14.38 7.99-20.97 5.32-6.59 11.85-10.64 19.57-12.15.54 2.17.81 4.23.81 6.19 0 7.39-2.82 14.65-8.48 21.78-5.65 7.12-12.38 11.23-20.19 12.31-.22-2.39-.33-4.78-.33-7.16z"/></svg>
+          <span>Continue with Apple</span>
+        </button>
+      </div>
+
+      <div class="pt-2 text-center">
+        <span class="text-[10px] text-slate-500">Zero cloud dependencies. Guest Admin remains active without login.</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="/static/js/crashpad.js"></script>
   <script src="/static/js/components.js"></script>
   <script src="/static/js/websocket.js"></script>
   <script src="/static/js/charts.js?v=3"></script>
+  <!-- Firebase Auth Web SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="/static/js/firebase_auth.js"></script>
   <script src="/static/js/app.js?v=3"></script>
 </body>
 </html>
