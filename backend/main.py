@@ -43,6 +43,7 @@ from backend.routers.gemini_sentinel import router as gemini_sentinel_router
 from backend.routers.qos import router as qos_router
 from backend.routers.stealth import router as stealth_router
 from backend.routers.ai_netpilot import router as ai_netpilot_router
+from backend.routers.workspace import router as workspace_router
 from backend.core.gemini_sentinel import gemini_sentinel
 from backend.core.qos_engine import qos_engine
 from backend.core.stealth_engine import stealth_engine
@@ -135,6 +136,21 @@ def get_telemetry_snapshot_sync() -> Dict[str, Any]:
     except Exception:
         netpilot_data = {}
 
+    try:
+        schedules_data = db.get_schedules()
+    except Exception:
+        schedules_data = []
+
+    try:
+        timers_data = scheduler.get_active_timers()
+    except Exception:
+        timers_data = []
+
+    try:
+        routines_data = scheduler.get_routines_status()
+    except Exception:
+        routines_data = {}
+
     return {
         "type": "TICK",
         "timestamp": time.time(),
@@ -151,6 +167,9 @@ def get_telemetry_snapshot_sync() -> Dict[str, Any]:
         "stealth": stealth_data,
         "sentinel": sentinel_data,
         "netpilot": netpilot_data,
+        "schedules": schedules_data,
+        "timers": timers_data,
+        "routines": routines_data,
         "ad_stats": {
             "total_blocked": ad_stats.get("total_blocked", 0),
             "total_queries": ad_stats.get("total_queries", 0)
@@ -266,6 +285,7 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=500)  # Compress responses > 500 bytes
 
 from firewall.firewall_router import router as firewall_router
+from backend.routers.auth import router as auth_router
 
 app.include_router(devices_router)
 app.include_router(apps_router)
@@ -283,13 +303,40 @@ app.include_router(gemini_sentinel_router)
 app.include_router(qos_router)
 app.include_router(stealth_router)
 app.include_router(ai_netpilot_router)
+app.include_router(workspace_router)
+app.include_router(auth_router)
 
+
+@app.get("/health")
+def health_check():
+    """Ultra-fast, zero-overhead sub-millisecond health endpoint for desktop app bootstrap."""
+    return {"status": "ok", "time": time.time()}
+
+
+@app.get("/api/bootstrap")
+async def get_bootstrap_payload():
+    """Consolidated bootstrap payload returning network info, devices, apps, sites, settings, schedules, and active user in a single sub-10ms request."""
+    snapshot = await get_telemetry_snapshot()
+    settings = db.get_all_settings()
+    current_user = db.get_current_user()
+    network_info = {
+        "gateway_ip": AppConfig.GATEWAY_IP,
+        "local_ip": AppConfig.LOCAL_IP,
+        "interface": AppConfig.NETWORK_INTERFACE
+    }
+    return {
+        "telemetry": snapshot,
+        "network_info": network_info,
+        "settings": settings,
+        "user": current_user
+    }
 
 
 @app.get("/api/telemetry/live", response_model=Dict[str, Any])
 async def get_live_telemetry_bundle():
     """Unified Live Telemetry Endpoint: Returns full real-time snapshot for Fallback Polling & Diagnostics."""
     return await get_telemetry_snapshot()
+
 
 
 @app.websocket("/ws")

@@ -90,6 +90,18 @@ class Database:
             );
             """)
 
+            # 3b. Countdown Sleep Timers Table
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS countdown_timers (
+                mac TEXT PRIMARY KEY,
+                name TEXT DEFAULT '',
+                action TEXT DEFAULT 'BLOCK',
+                duration_minutes INTEGER NOT NULL,
+                expires_at REAL NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """)
+
             # 4. Ad-Purge Rules Table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS adblock_rules (
@@ -135,13 +147,31 @@ class Database:
             );
             """)
 
+            # 8. User Accounts (Firebase Identity & Google/Apple OAuth Sync)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS app_users (
+                uid TEXT PRIMARY KEY,
+                email TEXT,
+                display_name TEXT,
+                photo_url TEXT,
+                provider TEXT DEFAULT 'google.com',
+                is_active_session INTEGER DEFAULT 1,
+                last_login TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """)
+
             # Seed defaults
             defaults = [
                 ("auto_quarantine", "0"),
                 ("run_on_startup", "0"),
                 ("minimize_to_tray", "1"),
                 ("emergency_pause_active", "0"),
-                ("turbo_focus_mac", "")
+                ("turbo_focus_mac", ""),
+                ("firebase_api_key", ""),
+                ("firebase_auth_domain", ""),
+                ("firebase_project_id", ""),
+                ("firebase_app_id", "")
             ]
             for k, v in defaults:
                 cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", (k, v))
@@ -454,6 +484,57 @@ class Database:
             conn.commit()
             return cursor.rowcount > 0
 
+    def toggle_schedule(self, schedule_id: int, is_active: Optional[bool] = None) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if is_active is None:
+                cursor.execute("UPDATE schedules SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?", (schedule_id,))
+            else:
+                cursor.execute("UPDATE schedules SET is_active = ? WHERE id = ?", (1 if is_active else 0, schedule_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_schedule(self, schedule_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    # --- COUNTDOWN SLEEP TIMERS ---
+    def add_countdown_timer(self, mac: str, name: str, action: str, duration_minutes: int, expires_at: float) -> bool:
+        mac = mac.lower().replace("-", ":")
+        now_ts = datetime.datetime.now().timestamp()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT OR REPLACE INTO countdown_timers (mac, name, action, duration_minutes, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, (mac, name, action, duration_minutes, expires_at, now_ts))
+            conn.commit()
+            return True
+
+    def get_countdown_timers(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM countdown_timers ORDER BY expires_at ASC")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def delete_countdown_timer(self, mac: str) -> bool:
+        mac = mac.lower().replace("-", ":")
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM countdown_timers WHERE mac = ?", (mac,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def cleanup_expired_timers(self, now_ts: float) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM countdown_timers WHERE expires_at <= ?", (now_ts,))
+            conn.commit()
+            return cursor.rowcount
+
     # --- SETTINGS ---
     def get_setting(self, key: str, default: str = "") -> str:
         with self.get_connection() as conn:
@@ -545,4 +626,47 @@ class Database:
             self._blocked_domains_cache.discard(domain)
         return count > 0
 
+    # --- USER ACCOUNTS (FIREBASE IDENTITY) ---
+    def sync_user(self, uid: str, email: str = "", display_name: str = "", photo_url: str = "", provider: str = "google.com") -> Optional[Dict[str, Any]]:
+        if not uid:
+            return None
+        now = datetime.datetime.now().isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE app_users SET is_active_session = 0")
+            cursor.execute("""
+            INSERT INTO app_users (uid, email, display_name, photo_url, provider, is_active_session, last_login, created_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(uid) DO UPDATE SET
+                email = excluded.email,
+                display_name = excluded.display_name,
+                photo_url = excluded.photo_url,
+                provider = excluded.provider,
+                is_active_session = 1,
+                last_login = excluded.last_login
+            """, (uid, email or "", display_name or "", photo_url or "", provider, now, now))
+            conn.commit()
+        return self.get_current_user()
+
+    def get_current_user(self) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM app_users WHERE is_active_session = 1 ORDER BY last_login DESC LIMIT 1")
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def signout_user(self) -> bool:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE app_users SET is_active_session = 0")
+            conn.commit()
+            return True
+
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM app_users ORDER BY last_login DESC")
+            return [dict(row) for row in cursor.fetchall()]
+
 db = Database.get_instance()
+

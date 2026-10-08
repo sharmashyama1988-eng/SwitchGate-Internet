@@ -49,6 +49,12 @@
         </span>
         <span class="text-[9px] font-mono bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30 font-bold animate-pulse">ACTIVE</span>
       </a>
+      <a class="nav-link" id="nav-automation" role="tab" aria-selected="false" tabindex="0" aria-controls="view-automation" onclick="switchView('automation')" onkeydown="if(event.key==='Enter'||event.key===' ')switchView('automation')">
+        <span class="font-bold tracking-wider flex items-center gap-1.5">
+          <span>AUTOMATION</span>
+        </span>
+        <span class="text-[10px] font-mono bg-cyan-500/15 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30 font-bold" id="sidebarAutomationCount" role="status" aria-live="polite">0</span>
+      </a>
       <a class="nav-link" id="nav-settings" role="tab" aria-selected="false" tabindex="0" aria-controls="view-settings" onclick="switchView('settings')" onkeydown="if(event.key==='Enter'||event.key===' ')switchView('settings')">
         <span class="font-bold tracking-wider">SETTINGS</span>
       </a>
@@ -82,6 +88,19 @@
           <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
           <span>⚡ kPerf: <span id="headerKperfStatus" class="font-bold text-white">0% CPU</span> (<span id="headerKperfShadows">0</span> shadows)</span>
         </div>
+
+        <!-- Google Workspace Cloud Bridge Indicator -->
+        <div id="headerWorkspaceStatus" class="hidden xl:flex items-center gap-1.5 text-[11px] font-mono text-slate-400 bg-white/5 px-3 py-1 rounded-full border border-white/5" title="Google Workspace Cloud Bridge Status">
+          <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400"></span>
+          <span class="text-slate-300">Workspace:</span>
+          <span class="text-cyan-400 font-bold">Cloud Ready</span>
+        </div>
+
+        <!-- Quick Sleep Timer Launcher -->
+        <button onclick="openQuickTimerModal()" aria-label="Quick Sleep Timer Launcher" class="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 hover:text-cyan-100 border border-cyan-500/30 transition active:scale-95 shadow-sm">
+          <span>⏱️</span>
+          <span>SLEEP TIMER</span>
+        </button>
 
         <!-- Emergency Pause / Dinner Time Freeze Master Switch -->
         <button id="btnEmergencyPause" onclick="toggleEmergencyPause()" aria-label="Pause Home Wi-Fi Network Master Switch" class="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-white/5 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-white/10 hover:border-rose-500/40 transition active:scale-95">
@@ -606,6 +625,210 @@
 
 
 
+      <!-- ================= 6. VIEW: SMART AUTOMATION & TIME-SCHEDULER ================= -->
+      <div id="view-automation" class="hidden space-y-4" role="tabpanel" aria-labelledby="nav-automation">
+        <!-- Header Bar -->
+        <div class="command-card p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border border-cyan-500/25 shadow-lg shadow-cyan-950/20">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-emerald-500/10 border border-cyan-500/30 flex items-center justify-center text-xl text-cyan-400 shadow-md">
+              ⏳
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-base font-black text-white tracking-tight">Smart Automation & Time-Scheduler</h3>
+                <span class="text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 px-2.5 py-0.5 rounded-full border border-cyan-500/30 animate-pulse">5S DAEMON ACTIVE</span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">Automated Curfew Windows • Live Countdown Sleep Timers • Autonomous Sweeps</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+            <button onclick="openQuickTimerModal()" class="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-cyan-300 hover:text-white transition active:scale-95 flex items-center gap-1.5 shadow-sm">
+              <span>⏱️</span>
+              <span>Quick Sleep Timer</span>
+            </button>
+            <button onclick="openAddScheduleModal()" class="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-black text-xs font-black transition active:scale-95 flex items-center gap-1.5 shadow-md shadow-cyan-500/25">
+              <span>+</span>
+              <span>New Schedule Rule</span>
+            </button>
+            <button onclick="fetchSchedulesAndTimers()" aria-label="Refresh Automation Schedules" class="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-400 hover:text-white">
+              ↻
+            </button>
+          </div>
+        </div>
+
+        <!-- Section 1: Active Sleep Timers (Live Countdown) -->
+        <div>
+          <div class="flex items-center justify-between mb-2.5 px-1">
+            <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 font-mono">
+              <span>Active Countdown Sleep Timers</span>
+              <span class="text-[10px] text-cyan-400 font-bold bg-cyan-950/40 px-2 py-0.2 rounded-full border border-cyan-500/30" id="timerCountBadge">0 Running</span>
+            </h4>
+            <span class="text-[11px] font-mono text-slate-500">Auto-terminates access upon expiry</span>
+          </div>
+
+          <div id="activeTimersGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            <!-- Populated dynamically via renderActiveTimersUI -->
+            <div class="col-span-full command-card p-5 border border-white/5 text-center text-slate-500 text-xs">
+              No active countdown timers running. Click <strong>"Quick Sleep Timer"</strong> above to auto-pause any device in 15m, 30m, 1h, or 2h.
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: 1-Click Rule Templates -->
+        <div>
+          <div class="mb-2.5 px-1">
+            <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest font-mono">1-Click Curfew Templates</h4>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <!-- Template 1: Kids Bedtime -->
+            <div class="command-card p-4 border border-white/8 hover:border-cyan-500/30 transition flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between gap-2 mb-1.5">
+                  <span class="text-lg">🌙</span>
+                  <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">22:00 - 06:00</span>
+                </div>
+                <h5 class="text-sm font-bold text-white">Kids Bedtime Curfew</h5>
+                <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Disconnects smartphones and gaming consoles overnight every day to guarantee undisturbed sleep.
+                </p>
+              </div>
+              <button onclick="applyTemplatePreset('kids_bedtime')" class="mt-3 w-full py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 hover:text-white text-xs font-bold transition">
+                ⚡ Apply to Device
+              </button>
+            </div>
+
+            <!-- Template 2: Study Focus -->
+            <div class="command-card p-4 border border-white/8 hover:border-emerald-500/30 transition flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between gap-2 mb-1.5">
+                  <span class="text-lg">📚</span>
+                  <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">14:00 - 17:00</span>
+                </div>
+                <h5 class="text-sm font-bold text-white">Study Focus Window</h5>
+                <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Enforces focused study periods on weekdays (Mon–Fri), pausing entertainment and streaming gadgets.
+                </p>
+              </div>
+              <button onclick="applyTemplatePreset('study_focus')" class="mt-3 w-full py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 hover:text-white text-xs font-bold transition">
+                ⚡ Apply to Device
+              </button>
+            </div>
+
+            <!-- Template 3: Overnight Wi-Fi Saver -->
+            <div class="command-card p-4 border border-white/8 hover:border-purple-500/30 transition flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between gap-2 mb-1.5">
+                  <span class="text-lg">🔋</span>
+                  <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20">01:00 - 06:30</span>
+                </div>
+                <h5 class="text-sm font-bold text-white">Overnight Wi-Fi Saver</h5>
+                <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Quenches idle smart TVs, IoT appliances, and background streaming during graveyard hours.
+                </p>
+              </div>
+              <button onclick="applyTemplatePreset('night_saver')" class="mt-3 w-full py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold transition">
+                ⚡ Apply to Device
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Configured Curfew & Access Schedules -->
+        <div>
+          <div class="flex items-center justify-between mb-2.5 px-1">
+            <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest font-mono">Configured Curfew Rules</h4>
+            <span class="text-[11px] font-mono text-cyan-400 font-bold" id="rulesCountBadge">0 Rules</span>
+          </div>
+
+          <div id="schedulesListGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            <!-- Populated dynamically via renderSchedulesUI -->
+            <div class="col-span-full command-card p-6 border border-white/5 text-center text-slate-500 text-xs">
+              No recurring curfew rules created yet. Click <strong>"New Schedule Rule"</strong> to automate bedtime internet cutoffs.
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Autonomous Background Routines -->
+        <div>
+          <div class="mb-2.5 px-1">
+            <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest font-mono">Autonomous Background Routines</h4>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <!-- Routine 1: Auto Network Discovery -->
+            <div class="command-card p-4 border border-white/8 flex flex-col justify-between">
+              <div class="flex items-start justify-between gap-3 mb-2">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-center text-lg text-cyan-400">
+                    🛰️
+                  </div>
+                  <div>
+                    <h5 class="text-xs font-bold text-white">Periodic Network Sweeps</h5>
+                    <p class="text-[11px] text-slate-400 mt-0.5">ARP sweeps every 15 mins to map new devices.</p>
+                  </div>
+                </div>
+                <label class="cyber-switch switch-cyan">
+                  <input type="checkbox" id="rtAutoScanToggle" checked onchange="toggleAutonomousRoutine('auto_scan', this.checked)">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>Next Sweep:</span>
+                <span class="text-cyan-400 font-bold" id="rtAutoScanNext">In 14m 20s</span>
+              </div>
+            </div>
+
+            <!-- Routine 2: Auto AI Security Audit -->
+            <div class="command-card p-4 border border-white/8 flex flex-col justify-between">
+              <div class="flex items-start justify-between gap-3 mb-2">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-lg text-emerald-400">
+                    🛡️
+                  </div>
+                  <div>
+                    <h5 class="text-xs font-bold text-white">AI Threat Sentinel Audits</h5>
+                    <p class="text-[11px] text-slate-400 mt-0.5">Deep packet audit every 12h for stealth threats.</p>
+                  </div>
+                </div>
+                <label class="cyber-switch">
+                  <input type="checkbox" id="rtAutoAuditToggle" checked onchange="toggleAutonomousRoutine('auto_audit', this.checked)">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>Next Audit:</span>
+                <span class="text-emerald-400 font-bold" id="rtAutoAuditNext">In 11h 45m</span>
+              </div>
+            </div>
+
+            <!-- Routine 3: Auto-Quarantine Unknown Intruders -->
+            <div class="command-card p-4 border border-white/8 flex flex-col justify-between">
+              <div class="flex items-start justify-between gap-3 mb-2">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-center text-lg text-rose-400">
+                    🚨
+                  </div>
+                  <div>
+                    <h5 class="text-xs font-bold text-white">Auto-Quarantine Watchdog</h5>
+                    <p class="text-[11px] text-slate-400 mt-0.5">Instantly drops unrecognized rogue devices.</p>
+                  </div>
+                </div>
+                <label class="cyber-switch">
+                  <input type="checkbox" id="rtAutoQuarantineToggle" onchange="toggleAutonomousRoutine('auto_quarantine', this.checked)">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>Watchdog State:</span>
+                <span class="text-amber-400 font-bold" id="rtAutoQuarantineStatus">Zero-Trust Ready</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ================= 7. VIEW: SETTINGS ================= -->
       <div id="view-settings" class="hidden max-w-4xl space-y-6 pb-12" role="tabpanel" aria-labelledby="nav-settings">
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -858,6 +1081,109 @@
           </div>
         </div>
 
+        <!-- 6. Google Workspace Enterprise Cloud Bridge -->
+        <div class="bg-[#141824] border border-cyan-500/25 rounded-2xl p-5 space-y-4 shadow-lg shadow-cyan-950/20">
+          <div class="flex items-center justify-between pb-2 border-b border-white/5">
+            <div class="flex items-center gap-2.5 text-cyan-400 font-bold text-sm">
+              <span class="text-lg">🌐</span>
+              <span>6. Google Workspace Enterprise Cloud Bridge</span>
+            </div>
+            <span class="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold">SHEETS • DOCS • DRIVE • CHAT • CALENDAR</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Webhook URL -->
+            <div class="md:col-span-2">
+              <label class="block text-xs font-bold text-slate-200 mb-1">Google Chat / Workspace Incoming Webhook URL</label>
+              <div class="text-[11px] text-slate-400 mb-2">Dispatches instant real-time security alerts (intruders, DDoS attempts, data leaks) to your Google Workspace channel.</div>
+              <div class="flex gap-2">
+                <input type="url" id="wsSettingWebhookUrl" placeholder="https://chat.googleapis.com/v1/spaces/.../messages?key=..." class="flex-1 bg-black/40 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400">
+                <button onclick="saveWorkspaceSetting('webhook_url', document.getElementById('wsSettingWebhookUrl').value)" class="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold transition active:scale-95 flex-shrink-0">
+                  Save
+                </button>
+                <button onclick="testWorkspaceWebhook()" class="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-cyan-300 hover:text-white transition active:scale-95 flex items-center gap-1.5 flex-shrink-0">
+                  <span>🚀</span>
+                  <span>Test Alert</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Calendar Feed URL -->
+            <div class="md:col-span-2">
+              <label class="block text-xs font-bold text-slate-200 mb-1">Google Calendar Public / Secret iCal Feed URL</label>
+              <div class="text-[11px] text-slate-400 mb-2">Syncs Google Calendar focus blocks and sleep events into SwitchGate Smart Schedules automatically.</div>
+              <div class="flex gap-2">
+                <input type="url" id="wsSettingCalendarUrl" placeholder="https://calendar.google.com/calendar/ical/.../basic.ics" class="flex-1 bg-black/40 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400">
+                <button onclick="saveWorkspaceSetting('calendar_feed_url', document.getElementById('wsSettingCalendarUrl').value)" class="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold transition active:scale-95 flex-shrink-0">
+                  Save
+                </button>
+                <button onclick="syncWorkspaceCalendar()" class="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-emerald-300 hover:text-white transition active:scale-95 flex items-center gap-1.5 flex-shrink-0">
+                  <span>📅</span>
+                  <span>Sync Now</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 1-Click Action Buttons -->
+            <div class="p-3.5 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between">
+              <div>
+                <div class="font-bold text-xs text-white flex items-center gap-1.5">
+                  <span>📊</span>
+                  <span>Google Sheets Live Telemetry Exporter</span>
+                </div>
+                <div class="text-[11px] text-slate-400 mt-1">Export full device inventory, bandwidth counters, and hardware OUI to Google Sheets format.</div>
+              </div>
+              <div class="flex items-center gap-2 mt-3">
+                <button onclick="exportToGoogleSheets()" class="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 hover:text-white text-xs font-bold transition flex items-center gap-1">
+                  <span>📥</span>
+                  <span>Sheets CSV</span>
+                </button>
+                <button onclick="exportAuditToGoogleSheets()" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white text-xs font-bold transition flex items-center gap-1">
+                  <span>📋</span>
+                  <span>Audit Logs</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="p-3.5 bg-black/30 rounded-xl border border-white/5 flex flex-col justify-between">
+              <div>
+                <div class="font-bold text-xs text-white flex items-center gap-1.5">
+                  <span>📝</span>
+                  <span>Google Docs Executive Audit Report</span>
+                </div>
+                <div class="text-[11px] text-slate-400 mt-1">Compile comprehensive security diagnostic and kernel topology report formatted for Google Docs.</div>
+              </div>
+              <div class="flex items-center gap-2 mt-3">
+                <button onclick="generateGoogleDocsReport()" class="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 text-cyan-300 hover:text-white text-xs font-bold transition flex items-center gap-1">
+                  <span>⚡</span>
+                  <span>Docs Report</span>
+                </button>
+                <button onclick="backupToGoogleDrive()" class="px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold transition flex items-center gap-1">
+                  <span>☁️</span>
+                  <span>Drive Backup</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Toggles -->
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Auto-Alert Intruders to Google Chat</div>
+                <div class="text-[11px] text-slate-400">Send instant webhook card when a rogue device connects.</div>
+              </div>
+              <input type="checkbox" id="wsSettingAutoAlert" onchange="saveWorkspaceSetting('auto_alert_intruders', this.checked)" class="w-5 h-5 accent-cyan-400 cursor-pointer">
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-black/30 rounded-xl border border-white/5">
+              <div>
+                <div class="font-bold text-xs text-white">Auto-Sync Google Calendar Schedules</div>
+                <div class="text-[11px] text-slate-400">Periodically align focus mode and sleep windows with calendar.</div>
+              </div>
+              <input type="checkbox" id="wsSettingAutoCalendar" onchange="saveWorkspaceSetting('auto_calendar_sync', this.checked)" class="w-5 h-5 accent-cyan-400 cursor-pointer">
+            </div>
+          </div>
+        </div>
+
         <!-- Hardware Network Diagnostic Footer -->
         <div class="bg-black/30 rounded-2xl p-4 border border-white/5 text-xs font-mono text-slate-400 flex flex-wrap items-center justify-between gap-3">
           <div><span class="text-slate-500">Interface:</span> <span id="settingsIface" class="text-cyan-400 font-bold">Wi-Fi 2</span></div>
@@ -873,6 +1199,142 @@
 
 
   <div id="toastContainer"></div>
+
+  <!-- Modal 1: Add New Curfew Schedule -->
+  <div id="modalAddSchedule" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modalAddSchedTitle">
+    <div class="modal-content p-6 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">🌙</span>
+          <h3 id="modalAddSchedTitle" class="text-base font-bold text-white">Create Curfew & Access Window Rule</h3>
+        </div>
+        <button onclick="closeModal('modalAddSchedule')" aria-label="Close modal" class="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold">✕</button>
+      </div>
+
+      <div class="space-y-3.5 text-xs">
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Target Device</label>
+          <select id="schedTargetDevice" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-cyan-400">
+            <!-- Populated dynamically via renderDeviceDropdown -->
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Rule Friendly Name</label>
+          <input type="text" id="schedRuleName" placeholder="e.g. Kids Tablet Bedtime Cutoff" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-300 mb-1">Cutoff Time (Start)</label>
+            <input type="time" id="schedStartTime" value="22:00" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-cyan-400">
+            <span class="text-[10px] text-slate-500">Internet access pauses</span>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-300 mb-1">Restore Time (End)</label>
+            <input type="time" id="schedEndTime" value="06:00" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-cyan-400">
+            <span class="text-[10px] text-slate-500">Internet access resumes</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Recurrence Days</label>
+          <select id="schedDays" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-cyan-400">
+            <option value="ALL">Every Day (Mon – Sun)</option>
+            <option value="WEEKDAYS">Weekdays Only (Mon – Fri)</option>
+            <option value="WEEKENDS">Weekends Only (Sat – Sun)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-white/10 flex items-center justify-end gap-2.5">
+        <button onclick="closeModal('modalAddSchedule')" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-slate-300">Cancel</button>
+        <button onclick="submitNewScheduleRule()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-black text-xs font-bold shadow-md shadow-cyan-500/20">Save Schedule Rule</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: Quick Sleep Timer -->
+  <div id="modalQuickTimer" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modalQuickTimerTitle">
+    <div class="modal-content p-6 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">⏱️</span>
+          <h3 id="modalQuickTimerTitle" class="text-base font-bold text-white">Start Countdown Sleep Timer</h3>
+        </div>
+        <button onclick="closeModal('modalQuickTimer')" aria-label="Close modal" class="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold">✕</button>
+      </div>
+
+      <div class="space-y-3.5 text-xs">
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Target Device</label>
+          <select id="timerTargetDevice" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-cyan-400">
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-300 mb-1.5">Timer Duration Presets</label>
+          <div class="grid grid-cols-4 gap-2 mb-2">
+            <button type="button" class="timer-preset-btn active py-2 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold" onclick="selectTimerPreset(15, this)">15 min</button>
+            <button type="button" class="timer-preset-btn py-2 rounded-xl bg-white/5 text-slate-300 border border-white/10 font-bold hover:bg-white/10" onclick="selectTimerPreset(30, this)">30 min</button>
+            <button type="button" class="timer-preset-btn py-2 rounded-xl bg-white/5 text-slate-300 border border-white/10 font-bold hover:bg-white/10" onclick="selectTimerPreset(60, this)">1 hour</button>
+            <button type="button" class="timer-preset-btn py-2 rounded-xl bg-white/5 text-slate-300 border border-white/10 font-bold hover:bg-white/10" onclick="selectTimerPreset(120, this)">2 hours</button>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Or custom minutes:</span>
+            <input type="number" id="timerCustomMins" min="1" max="1440" placeholder="15" value="15" class="w-24 bg-black/50 border border-white/15 rounded-xl px-3 py-1 text-white text-center font-mono focus:outline-none focus:border-cyan-400">
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Action Upon Timer Expiry</label>
+          <select id="timerAction" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-cyan-400">
+            <option value="BLOCK">Pause Internet Access (Auto-Cutoff)</option>
+            <option value="RESTORE">Restore Internet Access (Auto-Resume)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-white/10 flex items-center justify-end gap-2.5">
+        <button onclick="closeModal('modalQuickTimer')" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-slate-300">Cancel</button>
+        <button onclick="submitQuickTimer()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-black text-xs font-bold shadow-md shadow-cyan-500/20">Start Sleep Timer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Apply Curfew Template -->
+  <div id="modalApplyTemplate" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modalApplyTplTitle">
+    <div class="modal-content p-6 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-white/10">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl" id="tplModalIcon">⚡</span>
+          <h3 id="modalApplyTplTitle" class="text-base font-bold text-white">Apply Curfew Template</h3>
+        </div>
+        <button onclick="closeModal('modalApplyTemplate')" aria-label="Close modal" class="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white flex items-center justify-center text-sm font-bold">✕</button>
+      </div>
+
+      <div class="space-y-3.5 text-xs">
+        <div class="bg-black/40 p-3.5 rounded-xl border border-white/10">
+          <div class="font-bold text-white text-sm" id="tplModalName">Kids Bedtime Curfew</div>
+          <div class="text-slate-400 mt-1" id="tplModalDesc">Disconnects smartphones and consoles overnight.</div>
+          <div class="mt-2 text-cyan-400 font-mono font-bold" id="tplModalHours">Time: 22:00 – 06:00 (Every Day)</div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Select Target Device</label>
+          <select id="tplTargetDevice" class="w-full bg-black/50 border border-white/15 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-cyan-400">
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+      </div>
+
+      <div class="pt-3 border-t border-white/10 flex items-center justify-end gap-2.5">
+        <button onclick="closeModal('modalApplyTemplate')" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-slate-300">Cancel</button>
+        <button onclick="submitApplyTemplate()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-black text-xs font-bold shadow-md shadow-cyan-500/20">Apply Template</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Scripts -->
   <script src="/static/js/crashpad.js"></script>

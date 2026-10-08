@@ -235,18 +235,18 @@ def setup_tray(window):
         print(f"[Tray] System tray notice: {e}")
 
 def wait_for_server(port: int, timeout: float = 12.0) -> bool:
-    """Waits for FastAPI server to accept HTTP requests — max 12 seconds."""
+    """Waits for FastAPI server to accept HTTP requests via zero-overhead /health heartbeat — sub-50ms detection."""
     import urllib.request as _ur
     start = time.time()
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://127.0.0.1:{port}/health"
     while time.time() - start < timeout:
         try:
             req = _ur.Request(url, headers={"User-Agent": "SwitchGate-Desktop"})
-            with _ur.urlopen(req, timeout=0.8) as resp:
+            with _ur.urlopen(req, timeout=0.25) as resp:
                 if resp.status == 200:
                     return True
         except Exception:
-            time.sleep(0.08)   # 80ms poll — was 150ms
+            time.sleep(0.02)   # 20ms high-precision poll — was 80ms
     return False
 
 def main():

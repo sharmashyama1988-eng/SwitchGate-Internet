@@ -1,9 +1,8 @@
 /* ==========================================================================
    SwitchGate - Obsidian Cyber Studio Theme v3.0 (Master-Grade UI/UX)
    Cinematic Luxury, Deep Obsidian Dark Mode, 60 FPS Micro-Interactions
+   Zero-Blocking System Font Fallbacks for Ultra-Fast Instant Paint
    ========================================================================== */
-
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 :root {
   --bg-app: #080b13;
@@ -44,7 +43,7 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -706,3 +705,181 @@ body {
     animation: none !important;
   }
 }
+
+/* ================= Modal System ================= */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 7, 15, 0.84);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+  animation: fadeInModal 0.2s ease-out forwards;
+}
+
+.modal-overlay.open {
+  display: flex !important;
+}
+
+@keyframes fadeInModal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  background: linear-gradient(145deg, rgba(18, 25, 45, 0.98) 0%, rgba(10, 14, 28, 0.99) 100%);
+  border: 1px solid rgba(0, 245, 255, 0.25);
+  border-top: 1px solid rgba(0, 245, 255, 0.5);
+  border-radius: 20px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 245, 255, 0.12);
+  max-width: 540px;
+  width: 100%;
+  animation: scaleUpModal 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes scaleUpModal {
+  from { transform: scale(0.94); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Timer Ring & Progress Bar */
+.timer-progress-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.timer-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00f5ff, #10b981);
+  border-radius: 9999px;
+  transition: width 0.5s ease-out;
+  box-shadow: 0 0 10px rgba(0, 245, 255, 0.6);
+}
+
+/* ==========================================================================
+   Cyber Tactile Controls & Antigravity Elite HUD Design Tokens
+   ========================================================================== */
+.cyber-btn-primary {
+  background: linear-gradient(135deg, #00f5ff 0%, #00b4d8 100%);
+  color: #060910;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.5px;
+  border-radius: 12px;
+  padding: 8px 18px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 245, 255, 0.35);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.cyber-btn-primary:hover {
+  background: linear-gradient(135deg, #38bdf8 0%, #00f5ff 100%);
+  transform: translateY(-1.5px);
+  box-shadow: 0 8px 24px rgba(0, 245, 255, 0.55);
+}
+
+.cyber-btn-primary:active {
+  transform: scale(0.97);
+}
+
+.cyber-btn-ghost {
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 12px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.cyber-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+  border-color: rgba(0, 245, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.cyber-btn-danger {
+  background: linear-gradient(135deg, rgba(255, 45, 85, 0.2) 0%, rgba(225, 29, 72, 0.3) 100%);
+  color: #ff2d55;
+  font-weight: 800;
+  border-radius: 12px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 45, 85, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cyber-btn-danger:hover {
+  background: linear-gradient(135deg, #ff2d55 0%, #e11d48 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 18px rgba(255, 45, 85, 0.45);
+}
+
+/* Cyber Glow Badge */
+.cyber-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+
+.cyber-badge-cyan {
+  background: rgba(0, 245, 255, 0.12);
+  color: #00f5ff;
+  border: 1px solid rgba(0, 245, 255, 0.35);
+  box-shadow: 0 0 10px rgba(0, 245, 255, 0.15);
+}
+
+.cyber-badge-emerald {
+  background: rgba(0, 255, 157, 0.12);
+  color: #00ff9d;
+  border: 1px solid rgba(0, 255, 157, 0.35);
+  box-shadow: 0 0 10px rgba(0, 255, 157, 0.15);
+}
+
+.cyber-badge-purple {
+  background: rgba(157, 78, 221, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(157, 78, 221, 0.35);
+  box-shadow: 0 0 10px rgba(157, 78, 221, 0.15);
+}
+
+/* Animated Border Pulse for Critical Safeguards */
+@keyframes borderGlowPulse {
+  0% { border-color: rgba(0, 245, 255, 0.2); }
+  50% { border-color: rgba(0, 245, 255, 0.65); box-shadow: 0 0 20px rgba(0, 245, 255, 0.25); }
+  100% { border-color: rgba(0, 245, 255, 0.2); }
+}
+
+.glow-pulse-active {
+  animation: borderGlowPulse 2.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+

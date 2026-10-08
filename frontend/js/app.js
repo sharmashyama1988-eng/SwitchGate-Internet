@@ -13,7 +13,10 @@ const AppState = {
   ghostLeaks: [],
   networkInfo: {},
   emergencyPauseActive: false,
-  settings: {}
+  settings: {},
+  schedules: [],
+  timers: [],
+  routines: {}
 };
 
 const CategoryIcons = {
@@ -225,19 +228,46 @@ document.addEventListener("DOMContentLoaded", () => {
     if (data.netpilot) {
       updateNetpilotUi(data.netpilot);
     }
+
+    // 10. Automation & Time-Scheduler Live Telemetry
+    if (Array.isArray(data.schedules)) {
+      AppState.schedules = data.schedules;
+      const sideSched = document.getElementById("sidebarAutomationCount");
+      if (sideSched) sideSched.innerText = data.schedules.length + (AppState.timers ? AppState.timers.length : 0);
+      const rulesBadge = document.getElementById("rulesCountBadge");
+      if (rulesBadge) rulesBadge.innerText = `${data.schedules.length} Rules`;
+      if (AppState.activeView === "automation") renderSchedulesUI(data.schedules);
+    }
+
+    if (Array.isArray(data.timers)) {
+      AppState.timers = data.timers;
+      const tBadge = document.getElementById("timerCountBadge");
+      if (tBadge) tBadge.innerText = `${data.timers.length} Running`;
+      const sideSched = document.getElementById("sidebarAutomationCount");
+      if (sideSched) sideSched.innerText = (AppState.schedules ? AppState.schedules.length : 0) + data.timers.length;
+      if (AppState.activeView === "automation") renderActiveTimersUI(data.timers);
+    }
+
+    if (data.routines) {
+      AppState.routines = data.routines;
+      if (AppState.activeView === "automation") updateRoutinesUI(data.routines);
+    }
   });
 });
 
 async function fetchInitialState() {
   try {
-    const [netRes, devRes, appRes, siteRes, ghostRes, setRes, adRes] = await Promise.all([
+    const [netRes, devRes, appRes, siteRes, ghostRes, setRes, adRes, schedRes, timerRes, routRes] = await Promise.all([
       fetch("/api/network/info"),
       fetch("/api/devices"),
       fetch("/api/apps"),
       fetch("/api/websites"),
       fetch("/api/ghost-leaks"),
       fetch("/api/settings"),
-      fetch("/api/adblock/stats")
+      fetch("/api/adblock/stats"),
+      fetch("/api/schedules").catch(() => ({ json: () => [] })),
+      fetch("/api/schedules/timers").catch(() => ({ json: () => [] })),
+      fetch("/api/schedules/routines").catch(() => ({ json: () => ({}) }))
     ]);
 
     AppState.networkInfo = await netRes.json();
@@ -247,6 +277,9 @@ async function fetchInitialState() {
     AppState.ghostLeaks = await ghostRes.json();
     AppState.settings = await setRes.json();
     const adStats = await adRes.json();
+    AppState.schedules = await schedRes.json();
+    AppState.timers = await timerRes.json();
+    AppState.routines = await routRes.json();
 
     const gwIp = AppState.networkInfo.gateway_ip || "192.168.1.1";
     const headerGw = document.getElementById("headerGatewayIp");
@@ -262,6 +295,8 @@ async function fetchInitialState() {
     if (sideApp) sideApp.innerText = AppState.apps.length;
     const sideSite = document.getElementById("sidebarSiteCount");
     if (sideSite) sideSite.innerText = AppState.websites.length;
+    const sideSched = document.getElementById("sidebarAutomationCount");
+    if (sideSched) sideSched.innerText = AppState.schedules.length + AppState.timers.length;
 
     populateAdvancedSettings(AppState.settings);
 
@@ -287,7 +322,7 @@ function switchView(viewName) {
     activeLink.setAttribute("aria-selected", "true");
   }
 
-  ["dashboard", "network-map", "apps", "websites", "netpilot", "settings"].forEach(v => {
+  ["dashboard", "network-map", "apps", "websites", "netpilot", "automation", "settings"].forEach(v => {
     const el = document.getElementById(`view-${v}`);
     if (el) {
       if (v === viewName) {
@@ -319,6 +354,7 @@ function switchView(viewName) {
   if (viewName === "apps") renderAppsList();
   if (viewName === "websites") renderWebsitesList();
   if (viewName === "netpilot") fetchNetpilotStatus();
+  if (viewName === "automation") fetchSchedulesAndTimers();
   if (viewName === "settings") {
     fetch("/api/settings").then(r => r.json()).then(s => populateAdvancedSettings(s)).catch(() => {});
   }
@@ -972,6 +1008,9 @@ function populateAdvancedSettings(s) {
   if (startupEl) startupEl.checked = !!s.run_on_startup;
   const trayEl = document.getElementById("settingTray");
   if (trayEl) trayEl.checked = !!s.minimize_to_tray;
+
+  // 6. Google Workspace Bridge
+  loadWorkspaceSettingsUI();
 }
 
 async function saveAdvancedSetting(key, val) {
@@ -2287,5 +2326,547 @@ async function runNetpilotOptimize() {
     if (text) text.textContent = "Run Deep Optimization";
   }
 }
+
+// ===========================================================================
+// ⏳ SMART AUTOMATION & TIME-SCHEDULER ENGINE CONTROLLER
+// ===========================================================================
+
+let _selectedTimerMinutes = 15;
+let _activeTemplateKey = null;
+
+async function fetchSchedulesAndTimers() {
+  try {
+    const [schedRes, timerRes, routRes] = await Promise.all([
+      fetch("/api/schedules"),
+      fetch("/api/schedules/timers"),
+      fetch("/api/schedules/routines")
+    ]);
+    if (schedRes.ok) AppState.schedules = await schedRes.json();
+    if (timerRes.ok) AppState.timers = await timerRes.json();
+    if (routRes.ok) AppState.routines = await routRes.json();
+
+    renderAutomationView();
+  } catch (err) {
+    console.error("[SwitchGate] Failed to fetch automation data:", err);
+  }
+}
+
+function renderAutomationView() {
+  renderActiveTimersUI(AppState.timers || []);
+  renderSchedulesUI(AppState.schedules || []);
+  updateRoutinesUI(AppState.routines || {});
+
+  const totalAutomations = (AppState.schedules?.length || 0) + (AppState.timers?.length || 0);
+  const sideSched = document.getElementById("sidebarAutomationCount");
+  if (sideSched) sideSched.innerText = totalAutomations;
+  const tBadge = document.getElementById("timerCountBadge");
+  if (tBadge) tBadge.innerText = `${AppState.timers?.length || 0} Running`;
+  const rBadge = document.getElementById("rulesCountBadge");
+  if (rBadge) rBadge.innerText = `${AppState.schedules?.length || 0} Rules`;
+}
+
+function renderActiveTimersUI(timers) {
+  const container = document.getElementById("activeTimersGrid");
+  if (!container) return;
+
+  if (!timers || timers.length === 0) {
+    container.innerHTML = `
+      <div class="col-span-full command-card p-6 border border-white/5 text-center text-slate-500 text-xs">
+        No active countdown timers running. Click <button onclick="openQuickTimerModal()" class="text-cyan-400 font-bold underline hover:text-cyan-300">"Quick Sleep Timer"</button> above to auto-pause any device in 15m, 30m, 1h, or 2h.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = timers.map(t => {
+    const isBlock = t.action === "BLOCK";
+    const percent = typeof t.progress_percent === "number" ? t.progress_percent : 100;
+
+    return `
+      <div class="command-card p-4 border border-cyan-500/30 flex flex-col justify-between relative overflow-hidden shadow-lg shadow-cyan-950/30">
+        <!-- Top Row -->
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="min-w-0">
+            <h5 class="text-sm font-bold text-white truncate" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</h5>
+            <div class="text-[11px] font-mono text-slate-400 truncate">${escapeHtml(t.ip || t.mac)}</div>
+          </div>
+          <span class="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full ${isBlock ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'} flex-shrink-0">
+            ${isBlock ? 'CUTOFF AT 00:00' : 'RESTORE AT 00:00'}
+          </span>
+        </div>
+
+        <!-- Middle: Big Countdown Clock -->
+        <div class="my-3 text-center">
+          <div class="text-3xl font-black font-mono tracking-wider text-cyan-400 text-glow-cyan animate-pulse">
+            ${escapeHtml(t.remaining_formatted || '00:00')}
+          </div>
+          <div class="text-[10px] font-mono text-slate-400 mt-0.5">Time Remaining (${t.duration_minutes}m Initial)</div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="timer-progress-bar mb-3">
+          <div class="timer-progress-fill" style="width: ${percent}%;"></div>
+        </div>
+
+        <!-- Bottom Action Row -->
+        <div class="pt-2 border-t border-white/5 flex items-center justify-between">
+          <span class="text-[10px] font-mono text-slate-400">Action: <strong class="text-white">${escapeHtml(t.action)}</strong></span>
+          <button onclick="cancelActiveTimer('${escapeHtml(t.mac)}')" class="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-200 text-xs font-bold transition">
+            ✕ Cancel Timer
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderSchedulesUI(schedules) {
+  const container = document.getElementById("schedulesListGrid");
+  if (!container) return;
+
+  if (!schedules || schedules.length === 0) {
+    container.innerHTML = `
+      <div class="col-span-full command-card p-6 border border-white/5 text-center text-slate-500 text-xs">
+        No recurring curfew rules created yet. Click <button onclick="openAddScheduleModal()" class="text-cyan-400 font-bold underline hover:text-cyan-300">"New Schedule Rule"</button> to automate bedtime internet cutoffs.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = schedules.map(s => {
+    const isActive = !!s.is_active;
+
+    return `
+      <div class="command-card p-4 border ${isActive ? 'border-white/10' : 'border-white/5 opacity-60'} flex flex-col justify-between transition">
+        <div>
+          <!-- Top Row -->
+          <div class="flex items-start justify-between gap-3 mb-2">
+            <div class="min-w-0">
+              <h5 class="text-sm font-bold text-white truncate" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</h5>
+              <div class="text-[11px] font-mono text-slate-400 truncate">${escapeHtml(s.device_name || s.mac)}</div>
+            </div>
+            <label class="cyber-switch flex-shrink-0">
+              <input type="checkbox" ${isActive ? 'checked' : ''} onchange="toggleScheduleActive(${s.id}, this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <!-- Time Window Badge -->
+          <div class="bg-black/40 rounded-xl p-2.5 border border-white/5 my-2 flex items-center justify-between font-mono text-xs">
+            <span class="text-slate-400">Curfew Window:</span>
+            <span class="text-cyan-300 font-bold tracking-wider">${escapeHtml(s.start_time)} → ${escapeHtml(s.end_time)}</span>
+          </div>
+
+          <!-- Days Badge -->
+          <div class="flex items-center justify-between text-[11px] font-mono text-slate-400">
+            <span>Recurrence:</span>
+            <span class="px-2 py-0.5 rounded-full bg-white/5 text-slate-300 font-bold border border-white/10">${escapeHtml(s.days || 'ALL')}</span>
+          </div>
+        </div>
+
+        <!-- Bottom Action Row -->
+        <div class="pt-2.5 mt-3 border-t border-white/5 flex items-center justify-between">
+          <span class="text-[10px] font-mono ${isActive ? 'text-emerald-400' : 'text-slate-500'} font-bold">
+            ${isActive ? '● Enforcing Curfew' : '○ Schedule Paused'}
+          </span>
+          <button onclick="deleteScheduleRule(${s.id})" title="Delete rule" class="p-1 rounded-lg text-slate-500 hover:text-rose-400 transition">
+            🗑️
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function updateRoutinesUI(routines) {
+  if (!routines) return;
+
+  if (routines.auto_scan) {
+    const tScan = document.getElementById("rtAutoScanToggle");
+    if (tScan) tScan.checked = !!routines.auto_scan.enabled;
+    const nScan = document.getElementById("rtAutoScanNext");
+    if (nScan) nScan.textContent = routines.auto_scan.enabled ? `In ${routines.auto_scan.next_formatted}` : "Disabled";
+  }
+
+  if (routines.auto_audit) {
+    const tAudit = document.getElementById("rtAutoAuditToggle");
+    if (tAudit) tAudit.checked = !!routines.auto_audit.enabled;
+    const nAudit = document.getElementById("rtAutoAuditNext");
+    if (nAudit) nAudit.textContent = routines.auto_audit.enabled ? `In ${routines.auto_audit.next_formatted}` : "Disabled";
+  }
+
+  if (routines.auto_quarantine) {
+    const tQuar = document.getElementById("rtAutoQuarantineToggle");
+    if (tQuar) tQuar.checked = !!routines.auto_quarantine.enabled;
+    const sQuar = document.getElementById("rtAutoQuarantineStatus");
+    if (sQuar) sQuar.textContent = routines.auto_quarantine.enabled ? "Active Drop Shield" : "Zero-Trust Ready";
+  }
+}
+
+function populateDeviceDropdown(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+
+  const devs = AppState.devices || [];
+  if (devs.length === 0) {
+    sel.innerHTML = `<option value="">No devices detected (Rescan router)</option>`;
+    return;
+  }
+
+  sel.innerHTML = devs.map(d => {
+    const name = d.custom_name || d.vendor || d.ip || d.mac;
+    return `<option value="${escapeHtml(d.mac)}">${escapeHtml(name)} (${escapeHtml(d.ip)})</option>`;
+  }).join("");
+}
+
+// Modal Handlers
+function openAddScheduleModal() {
+  populateDeviceDropdown("schedTargetDevice");
+  openModal("modalAddSchedule");
+}
+
+async function submitNewScheduleRule() {
+  const mac = document.getElementById("schedTargetDevice")?.value;
+  const name = document.getElementById("schedRuleName")?.value.trim();
+  const startTime = document.getElementById("schedStartTime")?.value;
+  const endTime = document.getElementById("schedEndTime")?.value;
+  const days = document.getElementById("schedDays")?.value || "ALL";
+
+  if (!mac || !startTime || !endTime) {
+    showToast("Invalid Input", "Please select a device and set start/end times", "warning");
+    return;
+  }
+
+  const ruleName = name || `Curfew (${startTime} - ${endTime})`;
+
+  try {
+    const res = await fetch("/api/schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mac, name: ruleName, start_time: startTime, end_time: endTime, days })
+    });
+    const data = await res.json();
+    closeModal("modalAddSchedule");
+    showToast("Schedule Activated", data.message, "success");
+    fetchSchedulesAndTimers();
+  } catch (err) {
+    showToast("Error", "Failed to create schedule rule", "danger");
+  }
+}
+
+async function toggleScheduleActive(id, enabled) {
+  try {
+    const res = await fetch(`/api/schedules/${id}/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: enabled })
+    });
+    const data = await res.json();
+    showToast("Schedule Updated", enabled ? "Curfew rule activated" : "Curfew rule paused", "success");
+    fetchSchedulesAndTimers();
+  } catch (err) {
+    showToast("Error", "Failed to toggle schedule", "danger");
+  }
+}
+
+async function deleteScheduleRule(id) {
+  try {
+    const res = await fetch(`/api/schedules/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    showToast("Schedule Deleted", data.message, "info");
+    fetchSchedulesAndTimers();
+  } catch (err) {
+    showToast("Error", "Failed to delete schedule rule", "danger");
+  }
+}
+
+function openQuickTimerModal() {
+  populateDeviceDropdown("timerTargetDevice");
+  selectTimerPreset(15);
+  openModal("modalQuickTimer");
+}
+
+function selectTimerPreset(mins, btn) {
+  _selectedTimerMinutes = mins;
+  const input = document.getElementById("timerCustomMins");
+  if (input) input.value = mins;
+
+  document.querySelectorAll(".timer-preset-btn").forEach(b => {
+    b.className = "timer-preset-btn py-2 rounded-xl bg-white/5 text-slate-300 border border-white/10 font-bold hover:bg-white/10";
+  });
+  if (btn) {
+    btn.className = "timer-preset-btn active py-2 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold";
+  }
+}
+
+async function submitQuickTimer() {
+  const mac = document.getElementById("timerTargetDevice")?.value;
+  const customMins = parseInt(document.getElementById("timerCustomMins")?.value, 10);
+  const minutes = (!isNaN(customMins) && customMins > 0) ? customMins : _selectedTimerMinutes;
+  const action = document.getElementById("timerAction")?.value || "BLOCK";
+
+  if (!mac) {
+    showToast("Invalid Input", "Please select a target device", "warning");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/schedules/timers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mac, minutes, action })
+    });
+    const data = await res.json();
+    closeModal("modalQuickTimer");
+    showToast("Sleep Timer Started", data.message, "success");
+    fetchSchedulesAndTimers();
+  } catch (err) {
+    showToast("Error", "Failed to start sleep timer", "danger");
+  }
+}
+
+async function cancelActiveTimer(mac) {
+  try {
+    const res = await fetch(`/api/schedules/timers/${encodeURIComponent(mac)}`, { method: "DELETE" });
+    const data = await res.json();
+    showToast("Timer Cancelled", data.message, "info");
+    fetchSchedulesAndTimers();
+  } catch (err) {
+    showToast("Error", "Failed to cancel sleep timer", "danger");
+  }
+}
+
+const TEMPLATE_PRESETS = {
+  kids_bedtime: {
+    icon: "🌙",
+    name: "Kids Bedtime Curfew",
+    desc: "Disconnects smartphones and gaming consoles overnight every day (22:00 – 06:00).",
+    hours: "Time: 22:00 – 06:00 (Every Day)"
+  },
+  study_focus: {
+    icon: "📚",
+    name: "Study Focus Window",
+    desc: "Enforces focused study periods on weekdays (Mon–Fri), pausing entertainment gadgets (14:00 – 17:00).",
+    hours: "Time: 14:00 – 17:00 (Weekdays Only)"
+  },
+  night_saver: {
+    icon: "🔋",
+    name: "Overnight Wi-Fi Saver",
+    desc: "Quenches idle smart TVs, IoT appliances, and background streaming during graveyard hours (01:00 – 06:30).",
+    hours: "Time: 01:00 – 06:30 (Every Day)"
+  }
+};
+
+function applyTemplatePreset(templateKey) {
+  _activeTemplateKey = templateKey;
+  const tpl = TEMPLATE_PRESETS[templateKey];
+  if (!tpl) return;
+
+  const iconEl = document.getElementById("tplModalIcon");
+  if (iconEl) iconEl.textContent = tpl.icon;
+  const nameEl = document.getElementById("tplModalName");
+  if (nameEl) nameEl.textContent = tpl.name;
+  const descEl = document.getElementById("tplModalDesc");
+  if (descEl) descEl.textContent = tpl.desc;
+  const hoursEl = document.getElementById("tplModalHours");
+  if (hoursEl) hoursEl.textContent = tpl.hours;
+
+  populateDeviceDropdown("tplTargetDevice");
+  openModal("modalApplyTemplate");
+}
+
+async function submitApplyTemplate() {
+  const mac = document.getElementById("tplTargetDevice")?.value;
+  if (!mac || !_activeTemplateKey) {
+    showToast("Invalid Input", "Please select a target device", "warning");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/schedules/templates/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mac, template_key: _activeTemplateKey })
+    });
+    const data = await res.json();
+    closeModal("modalApplyTemplate");
+    showToast("Template Applied", data.message, "success");
+    fetchSchedulesAndTimers();
+  } catch (err) {
+    showToast("Error", "Failed to apply template", "danger");
+  }
+}
+
+async function toggleAutonomousRoutine(routineKey, enabled) {
+  try {
+    const payload = {};
+    if (routineKey === "auto_scan") payload.auto_scan_enabled = enabled;
+    if (routineKey === "auto_audit") payload.auto_audit_enabled = enabled;
+    if (routineKey === "auto_quarantine") payload.auto_quarantine_enabled = enabled;
+
+    const res = await fetch("/api/schedules/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    showToast("Routine Updated", "Autonomous routine setting saved", "success");
+    if (data.routines) updateRoutinesUI(data.routines);
+  } catch (err) {
+    showToast("Error", "Failed to update routine", "danger");
+  }
+}
+
+// ===========================================================================
+// 🌐 GOOGLE WORKSPACE ENTERPRISE CLOUD BRIDGE CONTROLLER
+// ===========================================================================
+
+async function loadWorkspaceSettingsUI() {
+  try {
+    const res = await fetch("/api/workspace/config");
+    if (!res.ok) return;
+    const cfg = await res.json();
+
+    const whEl = document.getElementById("wsSettingWebhookUrl");
+    if (whEl && cfg.webhook_url) whEl.value = cfg.webhook_url;
+
+    const calEl = document.getElementById("wsSettingCalendarUrl");
+    if (calEl && cfg.calendar_feed_url) calEl.value = cfg.calendar_feed_url;
+
+    const autoAlertEl = document.getElementById("wsSettingAutoAlert");
+    if (autoAlertEl) autoAlertEl.checked = !!cfg.auto_alert_intruders;
+
+    const autoCalEl = document.getElementById("wsSettingAutoCalendar");
+    if (autoCalEl) autoCalEl.checked = !!cfg.auto_calendar_sync;
+  } catch (err) {
+    console.error("[Workspace Bridge] Failed to load config:", err);
+  }
+}
+
+async function saveWorkspaceSetting(key, val) {
+  try {
+    const payload = {};
+    payload[key] = val;
+    const res = await fetch("/api/workspace/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      showToast("Workspace Config Saved", `Google Workspace setting updated`, "success");
+    }
+  } catch (err) {
+    showToast("Error", "Failed to save Google Workspace setting", "danger");
+  }
+}
+
+async function testWorkspaceWebhook() {
+  const url = document.getElementById("wsSettingWebhookUrl")?.value.trim();
+  if (url) {
+    await saveWorkspaceSetting("webhook_url", url);
+  }
+
+  showToast("Dispatching Alert", "Sending card to Google Chat...", "info");
+  try {
+    const res = await fetch("/api/workspace/test-webhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "SwitchGate Security Test Alert",
+        message: "Google Workspace enterprise integration active. Live telemetry and intrusion defense online.",
+        alert_type: "SUCCESS"
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast("Alert Delivered", data.message, "success");
+    } else {
+      showToast("Webhook Error", data.detail || "Check Webhook URL", "warning");
+    }
+  } catch (err) {
+    showToast("Connection Error", "Could not reach Google Chat webhook", "danger");
+  }
+}
+
+async function syncWorkspaceCalendar() {
+  const url = document.getElementById("wsSettingCalendarUrl")?.value.trim();
+  if (url) {
+    await saveWorkspaceSetting("calendar_feed_url", url);
+  }
+
+  showToast("Syncing Calendar", "Fetching Google Calendar events...", "info");
+  try {
+    const res = await fetch("/api/workspace/sync/calendar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast("Calendar Synced", data.message, "success");
+      fetchSchedulesAndTimers();
+    } else {
+      showToast("Sync Notice", data.detail || "Verify iCal URL", "warning");
+    }
+  } catch (err) {
+    showToast("Sync Failed", "Could not fetch Google Calendar feed", "danger");
+  }
+}
+
+function exportToGoogleSheets() {
+  showToast("Google Sheets Export", "Compiling live devices CSV...", "info");
+  window.location.href = "/api/workspace/export/sheets";
+}
+
+function exportAuditToGoogleSheets() {
+  showToast("Audit Logs Export", "Compiling security logs CSV...", "info");
+  window.location.href = "/api/workspace/export/audit";
+}
+
+async function generateGoogleDocsReport() {
+  showToast("Compiling Report", "Formatting executive Google Docs audit...", "info");
+  try {
+    const res = await fetch("/api/workspace/export/docs-report");
+    const data = await res.json();
+    if (data.content) {
+      const blob = new Blob([data.content], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `SwitchGate_GoogleDocs_AuditReport_${Date.now()}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Report Ready", "Downloaded Google Docs-formatted report (.md)", "success");
+    }
+  } catch (err) {
+    showToast("Error", "Failed to generate Google Docs report", "danger");
+  }
+}
+
+async function backupToGoogleDrive() {
+  showToast("Drive Backup", "Packaging database snapshot...", "info");
+  try {
+    const res = await fetch("/api/workspace/backup/drive", { method: "POST" });
+    const data = await res.json();
+    if (data.payload) {
+      const blob = new Blob([JSON.stringify(data.payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename || `SwitchGate_DriveBackup_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Drive Package Ready", `Backed up ${data.total_devices} devices & rules for Google Drive`, "success");
+    }
+  } catch (err) {
+    showToast("Backup Failed", "Could not package Drive snapshot", "danger");
+  }
+}
+
+
 
 
