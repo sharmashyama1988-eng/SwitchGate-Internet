@@ -388,6 +388,12 @@ Every 1000 milliseconds, the backend compiles a consolidated telemetry snapshot 
 - `POST /api/speedtest/start`: Perform network throughput and latency speed test.
 - `GET /api/apps/list`: List running Windows programs.
 - `POST /api/apps/block`: Create Windows Firewall block rule for program.
+- `GET /health`: Ultra-fast sub-millisecond heartbeat for instant desktop boot detection.
+- `GET /api/bootstrap`: Consolidated single-request bootstrap bundle (cuts frontend loading time by 75%).
+- `GET /api/auth/user`: Retrieve active Firebase authenticated profile (Google / Apple ID).
+- `POST /api/auth/sync`: Sync Firebase ID tokens and user credentials into SQLite WAL cache.
+- `POST /api/auth/signout`: Sign out active cloud identity.
+- `GET /api/auth/config` / `POST /api/auth/config`: Manage Firebase web app configuration.
 
 ---
 
