@@ -489,17 +489,24 @@ async function handleAppToggle(appName, exePath, action) {
   }
 }
 
-// ================= 2. LIVE WEBSITES & URLS RENDERING =================
 function renderWebsitesList() {
   const container = document.getElementById("websitesGrid");
   if (!container) return;
 
-  if (AppState.websites.length === 0) {
-    container.innerHTML = `<div class="col-span-full py-12 text-center text-slate-500 font-medium">No live websites recorded yet. Open any browser to see live streams!</div>`;
+  const query = (document.getElementById("siteSearchInput")?.value || "").toLowerCase().trim();
+  const list = AppState.websites.filter(site => {
+    if (!query) return true;
+    return (site.domain || "").toLowerCase().includes(query) || (site.friendly_name || "").toLowerCase().includes(query);
+  });
+
+  if (list.length === 0) {
+    container.innerHTML = query
+      ? `<div class="col-span-full py-12 text-center text-slate-500 font-medium">No domains match "${escapeHtml(query)}".</div>`
+      : `<div class="col-span-full py-12 text-center text-slate-500 font-medium">No live websites recorded yet. Open any browser to see live streams!</div>`;
     return;
   }
 
-  container.innerHTML = AppState.websites.map(site => {
+  container.innerHTML = list.map(site => {
     const isBlocked = !!site.is_blocked;
 
     return `

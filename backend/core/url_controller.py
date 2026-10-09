@@ -135,10 +135,41 @@ class WebsiteUrlController:
                 pass
         self._clear_windows_pac()
 
+    def _harvest_windows_dns_cache(self) -> List[str]:
+        """Harvests recently resolved domains from Windows DNS client cache."""
+        domains = set()
+        if not IS_WINDOWS:
+            return list(domains)
+        try:
+            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                   "Get-DnsClientCache -Type A -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Entry -Unique | Select-Object -First 30"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5, creationflags=0x08000000)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    d = line.strip().lower().rstrip(".")
+                    if d and "." in d and not d.endswith(".arpa") and not d.endswith(".local") and not d.endswith(".lan"):
+                        # Extract root domain or clean domain
+                        parts = d.split(".")
+                        if len(parts) >= 2:
+                            root = ".".join(parts[-2:])
+                            domains.add(root)
+                        else:
+                            domains.add(d)
+        except Exception:
+            pass
+        return list(domains)
+
     def _sync_kperf_domains(self):
+        tick = 0
         while not self._stop_event.is_set():
             try:
-                active_domains = kperf_engine.get_active_domains()
+                # 1. Sync from kPerf kernel packet shadows
+                active_domains = []
+                try:
+                    active_domains = kperf_engine.get_active_domains()
+                except Exception:
+                    pass
+
                 with self._lock:
                     for item in active_domains:
                         domain = item.get("domain", "").lower().strip()
@@ -150,16 +181,41 @@ class WebsiteUrlController:
                             self.live_websites[domain] = {
                                 "domain": domain,
                                 "friendly_name": friendly,
-                                "category": "Dynamic Live Browsing",
+                                "category": item.get("category", "Dynamic Live Browsing"),
                                 "company": friendly,
-                                "hits": item.get("hits", 1),
+                                "hits": int(item.get("hits", 1)),
                                 "last_seen": item.get("last_seen", time.strftime("%H:%M:%S")),
                                 "is_blocked": domain in self.blocked_domains
                             }
                         else:
-                            self.live_websites[domain]["hits"] = item.get("hits", self.live_websites[domain]["hits"] + 1)
+                            self.live_websites[domain]["hits"] = int(item.get("hits", self.live_websites[domain]["hits"] + 1))
                             self.live_websites[domain]["last_seen"] = item.get("last_seen", time.strftime("%H:%M:%S"))
                             self.live_websites[domain]["is_blocked"] = domain in self.blocked_domains
+
+                # 2. Every 3 seconds, harvest live Windows DNS Cache
+                tick += 1
+                if tick % 3 == 0:
+                    cached_dns = self._harvest_windows_dns_cache()
+                    now_str = time.strftime("%H:%M:%S")
+                    with self._lock:
+                        for c_dom in cached_dns:
+                            if c_dom not in self.live_websites:
+                                parts = c_dom.split(".")
+                                friendly = parts[-2].title() if len(parts) >= 2 else c_dom.title()
+                                self.live_websites[c_dom] = {
+                                    "domain": c_dom,
+                                    "friendly_name": friendly,
+                                    "category": "Live Visited Site",
+                                    "company": friendly,
+                                    "hits": 1,
+                                    "last_seen": now_str,
+                                    "is_blocked": c_dom in self.blocked_domains
+                                }
+                            else:
+                                if self.live_websites[c_dom]["last_seen"] == "Offline / Standby":
+                                    self.live_websites[c_dom]["last_seen"] = now_str
+                                    self.live_websites[c_dom]["hits"] = max(1, self.live_websites[c_dom].get("hits", 0) + 1)
+
             except Exception:
                 pass
             time.sleep(1.0)
@@ -167,7 +223,14 @@ class WebsiteUrlController:
     def get_live_websites(self) -> List[Dict[str, Any]]:
         with self._lock:
             sites = list(self.live_websites.values())
-        sites.sort(key=lambda x: (not x["is_blocked"], x["hits"]), reverse=True)
+        try:
+            sites.sort(key=lambda x: (
+                1 if x.get("is_blocked") else 0,
+                1 if x.get("last_seen") != "Offline / Standby" else 0,
+                int(x.get("hits") or 0)
+            ), reverse=True)
+        except Exception:
+            pass
         return sites
 
     def _resolve_domain_ips(self, domain: str) -> List[str]:

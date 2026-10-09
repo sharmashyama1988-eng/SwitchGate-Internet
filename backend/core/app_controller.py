@@ -139,12 +139,34 @@ class AppNetworkController:
 
     def _categorize_app(self, name: str) -> tuple[str, str]:
         lower = name.lower()
-        if any(x in lower for x in ("chrome", "edge", "msedge", "firefox", "brave", "opera")):
-            return "Web Browser", name.split(".")[0].title()
-        if any(x in lower for x in ("spotify", "discord", "telegram", "slack", "teams", "zoom", "whatsapp")):
-            return "Communication / Media", name.split(".")[0].title()
+        if "chrome" in lower:
+            return "Web Browser", "Google Chrome"
+        if "msedge" in lower or "edge" in lower:
+            return "Web Browser", "Microsoft Edge"
+        if "firefox" in lower:
+            return "Web Browser", "Mozilla Firefox"
+        if "brave" in lower:
+            return "Web Browser", "Brave Browser"
+        if "opera" in lower:
+            return "Web Browser", "Opera Browser"
+        if "spotify" in lower:
+            return "Communication / Media", "Spotify Music"
+        if "discord" in lower:
+            return "Communication / Media", "Discord"
+        if "telegram" in lower:
+            return "Communication / Media", "Telegram Desktop"
+        if "whatsapp" in lower:
+            return "Communication / Media", "WhatsApp"
+        if "slack" in lower:
+            return "Communication / Media", "Slack"
+        if "teams" in lower:
+            return "Communication / Media", "Microsoft Teams"
+        if "zoom" in lower:
+            return "Communication / Media", "Zoom Meeting"
         if any(x in lower for x in ("steam", "epic", "battle.net", "riot", "valorant", "csgo", "roblox")):
             return "Gaming Client", name.split(".")[0].title()
+        if any(x in lower for x in ("code", "cursor", "python", "node", "powershell", "cmd", "terminal")):
+            return "Developer Tools", name.split(".")[0].title()
         if any(x in lower for x in ("utorrent", "bittorrent", "qbittorrent", "transmission")):
             return "P2P / Torrent", name.split(".")[0].title()
         if any(x in lower for x in ("svchost", "system", "lsass", "spoolsv", "services")):
@@ -153,63 +175,112 @@ class AppNetworkController:
 
     def get_real_active_apps(self) -> List[Dict[str, Any]]:
         active_map: Dict[str, Dict[str, Any]] = {}
+        SYSTEM_NOISE = {
+            "system", "system idle process", "registry", "smss.exe", "csrss.exe", "wininit.exe",
+            "services.exe", "lsass.exe", "winlogon.exe", "fontdrvhost.exe", "dwm.exe", "spoolsv.exe",
+            "sihost.exe", "taskhostw.exe", "searchindexer.exe", "ctfmon.exe", "smartscreen.exe",
+            "securityhealthservice.exe", "securityhealthsystray.exe", "wmiprvse.exe", "conhost.exe",
+            "compattelrunner.exe", "sedsvc.exe", "msmpeng.exe", "nissrv.exe", "searchhost.exe",
+            "startmenuexperiencehost.exe", "shellexperiencehost.exe", "applicationframehost.exe"
+        }
+
+        # 1. Collect sockets from psutil.net_connections safely per PID
+        conn_by_pid: Dict[int, List[Any]] = {}
         try:
             for conn in psutil.net_connections(kind='inet'):
-                if not conn.pid:
-                    continue
-                try:
-                    p = psutil.Process(conn.pid)
-                    name = p.name()
-                    if not name:
-                        continue
+                if conn.pid:
+                    conn_by_pid.setdefault(conn.pid, []).append(conn)
+        except Exception:
+            pass
 
-                    app_key = name.lower().strip()
-                    exe_path = ""
+        # Also merge kperf kernel TCP table if available
+        try:
+            shadows = kperf_engine.get_kernel_tcp_table()
+            for s in shadows:
+                if s.pid and s.pid not in conn_by_pid:
+                    conn_by_pid.setdefault(s.pid, [])
+        except Exception:
+            pass
+
+        # 2. Enumerate running processes
+        for p in psutil.process_iter(['pid', 'name', 'exe']):
+            try:
+                name = p.info.get('name')
+                pid = p.info.get('pid')
+                if not name or not pid:
+                    continue
+
+                app_key = name.lower().strip()
+                if app_key in SYSTEM_NOISE:
+                    continue
+
+                exe_path = p.info.get('exe') or ""
+                exe_lower = exe_path.lower()
+                has_sockets = pid in conn_by_pid
+                is_known_app = any(k in app_key for k in (
+                    "chrome", "edge", "firefox", "brave", "opera", "discord", "spotify",
+                    "telegram", "slack", "teams", "zoom", "whatsapp", "steam", "epic",
+                    "code", "cursor", "python", "node", "powershell", "cmd", "torrent",
+                    "switchgate", "webview"
+                ))
+                is_user_path = any(dir_name in exe_lower for dir_name in (
+                    "program files", "program files (x86)", "appdata", "users"
+                ))
+
+                with self._lock:
+                    is_blocked = app_key in self.blocked_apps
+
+                # Include if has network connections, or known user app, or in user directory, or blocked
+                if not (has_sockets or is_known_app or is_user_path or is_blocked):
+                    continue
+
+                if app_key not in active_map:
+                    category, friendly_name = self._categorize_app(name)
+                    total_mb = 0.0
                     try:
-                        exe_path = p.exe()
+                        io = p.io_counters()
+                        total_mb = round((io.read_bytes + io.write_bytes) / (1024 * 1024), 2)
                     except Exception:
                         pass
 
-                    if app_key not in active_map:
-                        category, friendly_name = self._categorize_app(name)
-                        read_bytes, write_bytes = 0, 0
-                        try:
-                            io = p.io_counters()
-                            read_bytes = io.read_bytes
-                            write_bytes = io.write_bytes
-                        except Exception:
-                            pass
+                    conns = conn_by_pid.get(pid, [])
+                    rem_endpoint = "Listening"
+                    for c in conns:
+                        if hasattr(c, 'raddr') and c.raddr:
+                            rem_endpoint = f"{c.raddr.ip}:{c.raddr.port}"
+                            break
 
-                        total_mb = round((read_bytes + write_bytes) / (1024 * 1024), 2)
-                        with self._lock:
-                            is_blocked = app_key in self.blocked_apps
+                    active_map[app_key] = {
+                        "name": name,
+                        "friendly_name": friendly_name,
+                        "category": category,
+                        "exe_path": exe_path,
+                        "pids": [pid],
+                        "connections_count": len(conns),
+                        "remote_endpoint": rem_endpoint if not is_blocked else "Blocked",
+                        "is_blocked": is_blocked,
+                        "total_mb": total_mb,
+                        "current_kbps": self.app_live_speeds.get(app_key, 0.0) if not is_blocked else 0.0
+                    }
+                else:
+                    if pid not in active_map[app_key]["pids"]:
+                        active_map[app_key]["pids"].append(pid)
+                    conns = conn_by_pid.get(pid, [])
+                    active_map[app_key]["connections_count"] += len(conns)
+                    if not active_map[app_key]["exe_path"] and exe_path:
+                        active_map[app_key]["exe_path"] = exe_path
+                    if active_map[app_key]["remote_endpoint"] == "Listening":
+                        for c in conns:
+                            if hasattr(c, 'raddr') and c.raddr:
+                                active_map[app_key]["remote_endpoint"] = f"{c.raddr.ip}:{c.raddr.port}"
+                                break
 
-                        active_map[app_key] = {
-                            "name": name,
-                            "friendly_name": friendly_name,
-                            "category": category,
-                            "exe_path": exe_path,
-                            "pids": [conn.pid],
-                            "connections_count": 1,
-                            "remote_endpoint": f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "Listening",
-                            "is_blocked": is_blocked,
-                            "total_mb": total_mb,
-                            "current_kbps": self.app_live_speeds.get(app_key, 0.0) if not is_blocked else 0.0
-                        }
-                    else:
-                        if conn.pid not in active_map[app_key]["pids"]:
-                            active_map[app_key]["pids"].append(conn.pid)
-                        active_map[app_key]["connections_count"] += 1
-                        if conn.raddr and active_map[app_key]["remote_endpoint"] == "Listening":
-                            active_map[app_key]["remote_endpoint"] = f"{conn.raddr.ip}:{conn.raddr.port}"
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            except Exception:
+                continue
 
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-        except Exception as e:
-            print(f"[App Controller Scan Notice] {e}")
-
-        # Ensure all persistent blocked apps remain visible
+        # 3. Ensure all persistent blocked apps remain visible
         with self._lock:
             for b_app, exe in self.blocked_apps.items():
                 if b_app not in active_map:
@@ -228,7 +299,7 @@ class AppNetworkController:
                     }
 
         result = list(active_map.values())
-        result.sort(key=lambda x: (not x["is_blocked"], x["current_kbps"], x["connections_count"]), reverse=True)
+        result.sort(key=lambda x: (not x["is_blocked"], x["connections_count"] > 0, x["current_kbps"], x["total_mb"]), reverse=True)
         return result
 
     def _resolve_all_exe_paths(self, app_key: str, exe_path: str = "") -> List[str]:

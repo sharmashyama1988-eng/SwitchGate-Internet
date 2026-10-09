@@ -193,6 +193,11 @@ class KPerfHypervisor:
             "uptime_seconds": uptime_sec
         }
 
+    def get_active_domains(self) -> List[Dict[str, Any]]:
+        """Returns live domain hits tracked by kernel packet shadows."""
+        with self._state_lock:
+            return list(self.live_domain_hits.values())
+
     # ==========================================
     # Sub-Millisecond Kernel Circuit Breakers
     # ==========================================
